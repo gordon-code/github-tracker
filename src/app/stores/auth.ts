@@ -5,11 +5,18 @@ import { clearCache } from "./cache";
 import { clearSnapshot } from "../lib/dashboard-snapshot";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
-import { pushNotification } from "../lib/errors";
+import { pushNotification, dismissNotificationBySource } from "../lib/errors";
+import { reloadOnceForStaleChunk } from "../lib/chunk-reload";
+import { discardResponseBody } from "../lib/http-errors";
+import { isValidPatExpiryDate } from "../lib/pat";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
-import { DASHBOARD_BODIES_STORAGE_KEY } from "../../shared/types";
+import {
+  AUTH_OUTAGE_NOTIFICATION_SOURCE,
+  DASHBOARD_BODIES_STORAGE_KEY,
+  PAT_EXPIRY_DISMISSED_KEY,
+} from "../../shared/types";
 
 // Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
 const JiraAuthStateSchema = z.object({
@@ -25,6 +32,7 @@ const JiraAuthStateSchema = z.object({
 export type { JiraAuthState } from "../../shared/jira-types";
 
 export const AUTH_STORAGE_KEY = "github-tracker:auth-token";
+export const LAST_USER_STORAGE_KEY = "github-tracker:last-user";
 export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
 export const DEP_META_STORAGE_KEY = "github-tracker:dep-meta";
 export const JIRA_AUTH_STORAGE_KEY = "github-tracker:jira-auth";
@@ -41,16 +49,44 @@ interface TokenExchangeResponse {
   scope?: string;
 }
 
+function safeGetStorage(key: string): string | null {
+  try {
+    return localStorage.getItem?.(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function safeRemoveStorage(key: string): void {
+  try {
+    localStorage.removeItem?.(key);
+  } catch {
+    // ignore
+  }
+}
+
 // ── Signals ─────────────────────────────────────────────────────────────────
 
 // Access token is persisted to localStorage for permanent OAuth App tokens.
 // On page reload, validateToken() reads from localStorage and verifies with GitHub.
 // Optional chaining: happy-dom initializes localStorage methods lazily, so getItem
 // may not be a function yet during early module initialization in tests.
-const [_token, _setToken] = createSignal<string | null>(
-  localStorage.getItem?.(AUTH_STORAGE_KEY) ?? null
-);
-const [user, setUser] = createSignal<GitHubUser | null>(null);
+const [_token, _setToken] = createSignal<string | null>(safeGetStorage(AUTH_STORAGE_KEY));
+const [user, _setUser] = createSignal<GitHubUser | null>(null);
+
+function setUser(u: GitHubUser | null): void {
+  _setUser(u);
+  if (u !== null) {
+    const trimmed = u.login.trim();
+    if (trimmed.length > 0) {
+      try {
+        localStorage.setItem(LAST_USER_STORAGE_KEY, trimmed.toLowerCase());
+      } catch {
+        // best-effort: storage full or private mode
+      }
+    }
+  }
+}
 
 export const token = _token;
 
@@ -77,7 +113,7 @@ export function identityEpoch(): number {
 const [_jiraAuth, _setJiraAuth] = createSignal<JiraAuthState | null>(
   (() => {
     try {
-      const raw = localStorage.getItem?.(JIRA_AUTH_STORAGE_KEY);
+      const raw = safeGetStorage(JIRA_AUTH_STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as unknown;
       const result = JiraAuthStateSchema.safeParse(parsed);
@@ -135,6 +171,26 @@ export function clearJiraConfigFull(): void {
   _setJiraAuth(null);
   updateConfig({ jira: JiraConfigSchema.parse({}) });
   clearJiraKeyCache();
+}
+
+function wipeJiraAuthForIdentityReset(): void {
+  safeRemoveStorage(JIRA_AUTH_STORAGE_KEY);
+  _setJiraAuth(null);
+  clearJiraKeyCache();
+}
+
+function classifyIncomingIdentity(incomingLogin: string): "same" | "mismatch" | "unknown_with_jira" {
+  const storedLastUser = safeGetStorage(LAST_USER_STORAGE_KEY)?.trim() || null;
+  const currentLogin = user()?.login?.trim() || null;
+  const previousOwner = currentLogin ?? storedLastUser;
+
+  if (previousOwner !== null && previousOwner.toLowerCase() !== incomingLogin.trim().toLowerCase()) {
+    return "mismatch";
+  }
+  if (previousOwner === null && (_jiraAuth() !== null || safeGetStorage(JIRA_AUTH_STORAGE_KEY) !== null)) {
+    return "unknown_with_jira";
+  }
+  return "same";
 }
 
 // ── Jira token refresh ───────────────────────────────────────────────────────
@@ -203,24 +259,179 @@ export async function ensureJiraTokenValid(): Promise<boolean> {
   return _refreshingJira;
 }
 
+// ── Token verification & outage suspension state ─────────────────────────────
+
+const TOKEN_CHECK_TIMEOUT_MS = 10_000;
+const STALE_VERIFIER_COOLDOWN_MS = 15_000;
+
+export interface UnauthorizedContext {
+  endpointKind?: "user" | "graphql" | "rest";
+  requestId?: string | null;
+}
+
+export type UnauthorizedOutcome = "expired" | "preserved" | "ignored";
+
+const STALE_VERIFIER_RELOAD_KEY = "github-tracker:auth-401-chunk-reload";
+
+function clearStaleVerifierReloadFlag(): void {
+  try {
+    sessionStorage.removeItem(STALE_VERIFIER_RELOAD_KEY);
+  } catch {
+    // sessionStorage unavailable
+  }
+}
+
+const STALE_VERIFIER_CONFIRM_DELAY_MS = 1_000;
+
+function waitUnlessAborted(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * When the verifier chunk can't load, reload only if one more `GET /user` (after a short delay,
+ * since transient 401s cluster) also returns 401 and a fresh status probe reports no API Requests
+ * outage — a transient or outage 401 must not throw the user out of a working dashboard (boot
+ * validation during an outage routes to /login).
+ */
+async function isConfirmedOutsideOutage(failingToken: string, signal: AbortSignal): Promise<boolean> {
+  if (!(await waitUnlessAborted(STALE_VERIFIER_CONFIRM_DELAY_MS, signal))) return false;
+  try {
+    const resp = await makeUserCheckFetcher(failingToken, signal)();
+    discardResponseBody(resp);
+    if (resp.status !== 401) return false;
+  } catch {
+    return false;
+  }
+  const statusMod = await import("../services/github-status").catch(() => null);
+  if (!statusMod) return true;
+  await statusMod.fetchGitHubStatus();
+  return !statusMod.isGitHubApiOutage();
+}
+
+export const authNavigation = {
+  redirectToLogin(): void {
+    window.location.replace("/login");
+  },
+  /**
+   * Reloads the page when the lazy `auth-401` chunk can't be fetched (a tab
+   * that outlived a deploy). The reload boots against current assets, where
+   * `validateToken` can verify the token. Guarded to one reload per window.
+   */
+  reloadForStaleChunk(): void {
+    // Offline, the import failure is a network error, not a stale chunk — a reload would only show the browser's offline page.
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    try {
+      // At most one reload per session for this cause: if the chunk still fails on current assets
+      // (blocked or missing), further runtime 401s stay "preserved" instead of reloading every poll.
+      if (sessionStorage.getItem(STALE_VERIFIER_RELOAD_KEY) !== null) return;
+      sessionStorage.setItem(STALE_VERIFIER_RELOAD_KEY, String(Date.now()));
+      // Another reload within the shared guard window: none happened, so don't spend the one allowed.
+      if (!reloadOnceForStaleChunk()) sessionStorage.removeItem(STALE_VERIFIER_RELOAD_KEY);
+    } catch {
+      // sessionStorage unavailable: reload unguarded so a revoked token is still re-verified on current
+      // assets. Repeat reloads require another runtime 401, so the rate stays bounded by poll cadence.
+      window.location.reload();
+    }
+  },
+};
+
+let _tokenPersistedToStorage = safeGetStorage(AUTH_STORAGE_KEY) !== null;
+const _activeVerificationControllers = new Set<AbortController>();
+// Bumped whenever in-flight verifications are aborted; the lazy verifier tags its coalesced
+// flight and cooldown with this value and treats a mismatch as cleared.
+let _verificationGen = 0;
+let _staleVerifierCheck: Promise<UnauthorizedOutcome> | null = null;
+let _staleVerifierCooldown: { token: string; until: number } | null = null;
+let _outageSuspendStartedAt: number | null = null;
+let _bootValidateAttempted = false;
+
+export function hasBootValidateAttempted(): boolean {
+  return _bootValidateAttempted;
+}
+
+export function clearAuthOutageSuspension(): void {
+  if (_outageSuspendStartedAt === null) return;
+  _outageSuspendStartedAt = null;
+  dismissNotificationBySource(AUTH_OUTAGE_NOTIFICATION_SOURCE);
+}
+
+function abortAndClearPendingVerifications(): void {
+  for (const controller of _activeVerificationControllers) {
+    controller.abort();
+  }
+  _activeVerificationControllers.clear();
+  _verificationGen++;
+  _staleVerifierCheck = null;
+  _staleVerifierCooldown = null;
+}
+
+function setTokenInternal(nextToken: string | null, persisted: boolean): void {
+  _tokenPersistedToStorage = persisted;
+  if (nextToken !== _token()) {
+    abortAndClearPendingVerifications();
+    clearAuthOutageSuspension();
+    _setToken(nextToken);
+  }
+}
+
+export function _resetAuthVerificationState(): void {
+  abortAndClearPendingVerifications();
+  _outageSuspendStartedAt = null;
+  _bootValidateAttempted = false;
+  _tokenPersistedToStorage = safeGetStorage(AUTH_STORAGE_KEY) !== null;
+}
+
 // ── Actions ─────────────────────────────────────────────────────────────────
 
 export function setAuth(response: TokenExchangeResponse): void {
+  let persisted = false;
   try {
     localStorage.setItem(AUTH_STORAGE_KEY, response.access_token);
+    persisted = true;
   } catch {
     pushNotification("localStorage:auth", "Auth token write failed — storage may be full. Token exists in memory only this session.", "warning");
   }
-  _setToken(response.access_token);
+  abortAndClearPendingVerifications();
+  clearAuthOutageSuspension();
+  setTokenInternal(response.access_token, persisted);
   console.info("[auth] access token set");
 }
 
-export function setAuthFromPat(patToken: string, userData: GitHubUser): void {
-  const previousLogin = user()?.login;
-  const isIdentitySwitch =
-    previousLogin !== undefined && previousLogin.toLowerCase() !== userData.login.toLowerCase();
+function resetPerIdentityLocalState(): void {
+  resetConfig();
+  resetViewState();
+  safeRemoveStorage(CONFIG_STORAGE_KEY);
+  safeRemoveStorage(VIEW_STORAGE_KEY);
+}
 
-  if (isIdentitySwitch) {
+function clearPatExpiryDismissalKey(): void {
+  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
+}
+
+export function setAuthFromPat(
+  patToken: string,
+  userData: GitHubUser,
+  patExpiresAt: string | null = null
+): void {
+  const normalizedExpiry =
+    typeof patExpiresAt === "string" && isValidPatExpiryDate(patExpiresAt)
+      ? patExpiresAt
+      : null;
+  const identityClass = classifyIncomingIdentity(userData.login);
+
+  if (identityClass === "mismatch") {
     // A different GitHub identity is taking over this browser tab/session
     // (Settings > Replace token, used for a user switch rather than rotating
     // one's own token) — do a full reset matching clearAuth(): config
@@ -232,10 +443,7 @@ export function setAuthFromPat(patToken: string, userData: GitHubUser): void {
     // NOT touch AUTH_STORAGE_KEY or DASHBOARD_STORAGE_KEY here: the former is
     // overwritten below with the new token, and the latter is already
     // cleared by resetDashboardData() in the callback loop below.
-    resetConfig();
-    resetViewState();
-    localStorage.removeItem(CONFIG_STORAGE_KEY);
-    localStorage.removeItem(VIEW_STORAGE_KEY);
+    resetPerIdentityLocalState();
     // Clear IndexedDB cache + per-identity in-memory state. Fire-and-forget
     // here (preserving this synchronous path's long-standing non-blocking
     // behavior — the callback loop still runs synchronously because it precedes
@@ -243,11 +451,14 @@ export function setAuthFromPat(patToken: string, userData: GitHubUser): void {
     // import path calls `await clearIdentityData()` directly when it needs a
     // real ordering guarantee before establishing a new identity.
     void clearIdentityData();
+  } else if (identityClass === "unknown_with_jira") {
+    wipeJiraAuthForIdentityReset();
   }
 
   setAuth({ access_token: patToken });
   setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
-  updateConfig({ authMethod: "pat" });
+  updateConfig({ authMethod: "pat", patExpiresAt: normalizedExpiry });
+  clearPatExpiryDismissalKey();
 }
 
 /**
@@ -265,9 +476,21 @@ function clearSnapshotLogged(): Promise<void> {
   });
 }
 
+function clearDashboardStorageKeys(): void {
+  safeRemoveStorage(DASHBOARD_STORAGE_KEY);
+  safeRemoveStorage(DEP_META_STORAGE_KEY);
+  safeRemoveStorage(DASHBOARD_BODIES_STORAGE_KEY);
+}
+
+function runOnClearCallbacks(): void {
+  for (const cb of _onClearCallbacks) {
+    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
+  }
+}
+
 /**
  * Clears per-identity data: the `onAuthCleared` callback loop (poll data,
- * notifications, toast dedup, dashboard cache, Jira signal), the IndexedDB
+ * notifications, toast dedup, dashboard cache), the IndexedDB
  * dashboard snapshot, AND the IndexedDB API cache. The callbacks and the
  * snapshot clear's synchronous part (cancelling pending snapshot writes) run
  * before the first `await`, so a fire-and-forget `void clearIdentityData()`
@@ -279,15 +502,14 @@ function clearSnapshotLogged(): Promise<void> {
  * clears the API cache (`clearCache`).
  */
 export async function clearIdentityData(): Promise<void> {
-  localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
-  localStorage.removeItem?.(DEP_META_STORAGE_KEY);
-  localStorage.removeItem?.(DASHBOARD_BODIES_STORAGE_KEY);
+  safeRemoveStorage(LAST_USER_STORAGE_KEY);
+  clearPatExpiryDismissalKey();
+  wipeJiraAuthForIdentityReset();
+  clearDashboardStorageKeys();
   _identityEpoch++;
   // Synchronous per-identity resets first (matches the ordering the identity-
   // switch branch has always had: callbacks complete before the awaited work).
-  for (const cb of _onClearCallbacks) {
-    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity data clear:", e); }
-  }
+  runOnClearCallbacks();
   const snapshotClear = clearSnapshotLogged();
   // IndexedDB cache clear — AWAITED so callers can sequence work strictly after it
   // (prevents a new identity rendering the previous identity's cached data).
@@ -318,14 +540,16 @@ export function clearAuth(): void {
     resetConfig();
     resetViewState();
     // Clear localStorage entries (persistence effects will write back defaults)
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    localStorage.removeItem(CONFIG_STORAGE_KEY);
-    localStorage.removeItem(VIEW_STORAGE_KEY);
-    localStorage.removeItem(DASHBOARD_STORAGE_KEY);
-    localStorage.removeItem(DEP_META_STORAGE_KEY);
-    localStorage.removeItem(DASHBOARD_BODIES_STORAGE_KEY);
-    _setToken(null);
+    safeRemoveStorage(AUTH_STORAGE_KEY);
+    safeRemoveStorage(LAST_USER_STORAGE_KEY);
+    clearPatExpiryDismissalKey();
+    wipeJiraAuthForIdentityReset();
+    safeRemoveStorage(CONFIG_STORAGE_KEY);
+    safeRemoveStorage(VIEW_STORAGE_KEY);
+    clearDashboardStorageKeys();
+    setTokenInternal(null, false);
     setUser(null);
+    _bootValidateAttempted = false;
     _identityEpoch++;
     // Clear IndexedDB cache and snapshot to prevent data leakage between users
     clearCache().catch((err) => {
@@ -334,9 +558,7 @@ export function clearAuth(): void {
     });
     void clearSnapshotLogged();
     // Run registered cleanup callbacks (e.g., poll state reset)
-    for (const cb of _onClearCallbacks) {
-      try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
-    }
+    runOnClearCallbacks();
     console.info("[auth] auth cleared");
   } finally {
     _clearing = false;
@@ -353,15 +575,13 @@ export function clearAuth(): void {
  *  router navigate to /login). Fires onAuthCleared callbacks (resets poll state,
  *  clears API usage data). Use clearAuth() if not navigating. */
 export function expireToken(): void {
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-  localStorage.removeItem(DASHBOARD_STORAGE_KEY);
-  localStorage.removeItem(DEP_META_STORAGE_KEY);
-  localStorage.removeItem(DASHBOARD_BODIES_STORAGE_KEY);
-  _setToken(null);
+  safeRemoveStorage(AUTH_STORAGE_KEY);
+  clearDashboardStorageKeys();
+  setTokenInternal(null, false);
   setUser(null);
   _identityEpoch++;
   void clearSnapshotLogged();
-  _onClearCallbacks.forEach((cb) => { try { cb(); } catch (e) { console.warn("[auth] callback failed during expireToken:", e); } });
+  runOnClearCallbacks();
   console.info("[auth] token expired (dashboard cache cleared)");
 }
 
@@ -370,74 +590,248 @@ const VALIDATE_HEADERS = {
   "X-GitHub-Api-Version": "2022-11-28",
 } as const;
 
+function parseGitHubUserPayload(raw: unknown): GitHubUser | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.login !== "string" || typeof r.avatar_url !== "string") return null;
+  if (r.name !== null && typeof r.name !== "string") return null;
+  const trimmedLogin = r.login.trim();
+  if (trimmedLogin.length === 0) return null;
+  return { login: trimmedLogin, avatar_url: r.avatar_url, name: r.name };
+}
+
+function isCurrentSession(
+  capturedToken: string,
+  capturedEpoch: number,
+  signal: AbortSignal
+): boolean {
+  if (signal.aborted || _token() !== capturedToken || identityEpoch() !== capturedEpoch) {
+    return false;
+  }
+  if (!_tokenPersistedToStorage) return true;
+  return safeGetStorage(AUTH_STORAGE_KEY) === capturedToken;
+}
+
+function combineAbortSignals(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
+  const controller = new AbortController();
+  const listeners: Array<[AbortSignal, () => void]> = [];
+  const detach = () => {
+    for (const [s, l] of listeners) s.removeEventListener("abort", l);
+    listeners.length = 0;
+  };
+  for (const s of signals) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      detach();
+      break;
+    }
+    const onAbort = () => {
+      controller.abort(s.reason);
+      detach();
+    };
+    listeners.push([s, onAbort]);
+    s.addEventListener("abort", onAbort, { once: true });
+  }
+  return controller.signal;
+}
+
+/**
+ * `cache` defaults to `"no-store"` so 401 confirmations always reach GitHub. The first boot check
+ * passes `"default"`: GitHub marks `/user` `private, max-age=60`, so a quick reload can reuse the
+ * cached 200; a since-revoked token then fails its first API call and goes through runtime
+ * verification, which never uses the cache.
+ */
+function makeUserCheckFetcher(
+  capturedToken: string,
+  signal?: AbortSignal,
+  cache: RequestCache = "no-store"
+): () => Promise<Response> {
+  const headers = { ...VALIDATE_HEADERS, Authorization: `Bearer ${capturedToken}` };
+  return () => {
+    const timeout = AbortSignal.timeout(TOKEN_CHECK_TIMEOUT_MS);
+    return fetch("https://api.github.com/user", {
+      headers,
+      cache,
+      signal: signal ? combineAbortSignals([signal, timeout]) : timeout,
+    });
+  };
+}
+
+/**
+ * @internal State and helpers shared with the lazily loaded `auth-401` verifier, which holds the
+ * 401 confirmation state machine and the OAuth new-token check so neither ships on the boot path.
+ */
+export const authInternals = {
+  isCurrentSession,
+  makeUserCheckFetcher,
+  parseGitHubUserPayload,
+  classifyIncomingIdentity,
+  resetPerIdentityLocalState,
+  wipeJiraAuthForIdentityReset,
+  clearPatExpiryDismissalKey,
+  setUser,
+  trackController: (controller: AbortController): void => {
+    _activeVerificationControllers.add(controller);
+  },
+  untrackController: (controller: AbortController): void => {
+    _activeVerificationControllers.delete(controller);
+  },
+  verificationGen: (): number => _verificationGen,
+  getOutageSuspendStartedAt: (): number | null => _outageSuspendStartedAt,
+  setOutageSuspendStartedAt: (ts: number): void => {
+    _outageSuspendStartedAt = ts;
+  },
+};
+
+/**
+ * Runs when the lazy verifier chunk can't load. Coalesced and cooled down like the verifier
+ * itself, so a burst of 401s costs at most one confirmation check per 15 seconds.
+ */
+function handleStaleVerifierChunk(failingToken: string, epoch: number): Promise<UnauthorizedOutcome> {
+  if (_staleVerifierCheck) return _staleVerifierCheck;
+  if (_staleVerifierCooldown?.token === failingToken && Date.now() < _staleVerifierCooldown.until) {
+    return Promise.resolve("preserved");
+  }
+  const controller = new AbortController();
+  _activeVerificationControllers.add(controller);
+  const entry = { promise: Promise.resolve<UnauthorizedOutcome>("ignored") };
+  const run = async (): Promise<UnauthorizedOutcome> => {
+    try {
+      const reload = await isConfirmedOutsideOutage(failingToken, controller.signal);
+      if (!isCurrentSession(failingToken, epoch, controller.signal)) return "ignored";
+      if (reload) {
+        console.warn("[auth] 401 verifier chunk failed to load — reloading for current assets");
+        authNavigation.reloadForStaleChunk();
+      }
+      _staleVerifierCooldown = { token: failingToken, until: Date.now() + STALE_VERIFIER_COOLDOWN_MS };
+      return "preserved";
+    } finally {
+      _activeVerificationControllers.delete(controller);
+      if (_staleVerifierCheck === entry.promise) _staleVerifierCheck = null;
+    }
+  };
+  entry.promise = run();
+  _staleVerifierCheck = entry.promise;
+  return entry.promise;
+}
+
+export async function handleRuntimeUnauthorized(
+  failingToken: string,
+  ctx?: UnauthorizedContext
+): Promise<UnauthorizedOutcome> {
+  const epoch = identityEpoch();
+  const gen = _verificationGen;
+  if (!failingToken || _token() !== failingToken) {
+    return "ignored";
+  }
+  if (_tokenPersistedToStorage && safeGetStorage(AUTH_STORAGE_KEY) !== failingToken) {
+    return "ignored";
+  }
+  const mod = await import("./auth-401").catch(() => null);
+  if (gen !== _verificationGen || _token() !== failingToken || identityEpoch() !== epoch) {
+    return "ignored";
+  }
+  if (!mod) return handleStaleVerifierChunk(failingToken, epoch);
+  clearStaleVerifierReloadFlag();
+  return mod.verifyRuntimeUnauthorized(failingToken, epoch, gen, ctx);
+}
+
 export async function validateToken(): Promise<boolean> {
   const currentToken = _token();
   if (!currentToken) return false;
+  _bootValidateAttempted = true;
 
-  const headers = { ...VALIDATE_HEADERS, Authorization: `Bearer ${currentToken}` };
-
-  function handleSuccess(userData: GitHubUser): true {
-    setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
-    navigator.storage?.persist?.()?.catch(() => {});
-    return true;
-  }
+  const startEpoch = identityEpoch();
+  const controller = new AbortController();
+  _activeVerificationControllers.add(controller);
 
   try {
-    const resp = await fetch("https://api.github.com/user", { headers });
-
-    if (resp.ok) {
-      return handleSuccess((await resp.json()) as GitHubUser);
-    }
-
-    if (resp.status === 401) {
-      // GitHub API can return transient 401s due to database replication lag.
-      // Retry once after a delay before invalidating the token.
-      await new Promise((r) => setTimeout(r, 1000));
-      try {
-        const retry = await fetch("https://api.github.com/user", { headers });
-        if (retry.ok) {
-          return handleSuccess((await retry.json()) as GitHubUser);
-        }
-        if (retry.status !== 401) {
-          // Non-auth error on retry (e.g. 500) — preserve token, try next load
-          return false;
-        }
-      } catch {
-        // Network error on retry — preserve token, try next load
-        return false;
-      }
-
-      // Guard: if the token was replaced during the retry window (e.g., user
-      // re-authenticated via OAuth callback), don't invalidate the new token.
-      if (_token() !== currentToken) {
-        return false;
-      }
-
-      // Both attempts returned 401 — token is genuinely invalid
-      console.info(
-        config.authMethod === "pat"
-          ? "[auth] PAT invalid or expired — clearing token"
-          : "[auth] access token invalid — clearing token"
-      );
-      expireToken();
+    if (!isCurrentSession(currentToken, startEpoch, controller.signal)) {
       return false;
     }
 
-    return false;
-  } catch {
-    // Network error — permanent token survives transient failures
-    return false;
+    let resp: Response;
+    try {
+      resp = await makeUserCheckFetcher(currentToken, controller.signal, "default")();
+    } catch {
+      return false;
+    }
+    if (!isCurrentSession(currentToken, startEpoch, controller.signal)) {
+      return false;
+    }
+
+    let userData: GitHubUser | undefined;
+    if (resp.ok) {
+      let raw: unknown;
+      try {
+        raw = await resp.json();
+      } catch {
+        return false;
+      }
+      if (!isCurrentSession(currentToken, startEpoch, controller.signal)) {
+        return false;
+      }
+      const parsed = parseGitHubUserPayload(raw);
+      if (parsed === null) {
+        return false;
+      }
+      clearAuthOutageSuspension();
+      clearStaleVerifierReloadFlag();
+      userData = parsed;
+    } else if (resp.status === 401) {
+      discardResponseBody(resp);
+      const mod = await import("./auth-401").catch(() => null);
+      if (!isCurrentSession(currentToken, startEpoch, controller.signal) || !mod) {
+        return false;
+      }
+      clearStaleVerifierReloadFlag();
+      userData = await mod.verifyBootUnauthorized(currentToken, startEpoch, controller.signal);
+    } else {
+      discardResponseBody(resp);
+      return false;
+    }
+
+    if (!userData) {
+      return false;
+    }
+
+    if (!isCurrentSession(currentToken, startEpoch, controller.signal)) {
+      return false;
+    }
+
+    const identityClass = classifyIncomingIdentity(userData.login);
+    if (identityClass === "mismatch") {
+      // The token is unchanged, so its auth method and PAT expiry still describe
+      // this session; resetConfig() inside the reset would otherwise revert them.
+      const { authMethod, patExpiresAt } = config;
+      resetPerIdentityLocalState();
+      await clearIdentityData();
+      if (controller.signal.aborted || _token() !== currentToken) {
+        return false;
+      }
+      updateConfig({ authMethod, patExpiresAt });
+    }
+
+    setUser(userData);
+    navigator.storage?.persist?.()?.catch(() => {});
+    return true;
+  } finally {
+    _activeVerificationControllers.delete(controller);
   }
 }
 
-// Register Jira auth cleanup when GitHub auth is cleared (full logout).
-// Only clears localStorage + signal — does NOT call updateConfig because
-// clearAuth() already calls resetConfig() before firing these callbacks,
-// so all config fields (including jira.*) are already reset to their defaults.
-onAuthCleared(() => {
-  localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
-  _setJiraAuth(null);
-});
+/**
+ * Validates a freshly exchanged OAuth token before persisting it. Runs only on the OAuth callback
+ * page (a full navigation, so its assets are current), and lives in the lazy verifier chunk.
+ */
+export async function completeOAuthLogin(accessToken: string): Promise<boolean> {
+  if (!accessToken || !accessToken.trim()) {
+    return false;
+  }
+  const mod = await import("./auth-401").catch(() => null);
+  return mod ? mod.completeOAuthLogin(accessToken) : false;
+}
 
 let _crossTabFetchGen = 0;
 
@@ -471,19 +865,17 @@ function handleAuthStorage(e: StorageEvent): void {
     // Captured BEFORE the token/user update below, so the /user fetch result
     // can be compared against who THIS tab thought was signed in.
     const previousLogin = user()?.login;
-    _setToken(e.newValue);
+    setTokenInternal(e.newValue, true);
     const gen = ++_crossTabFetchGen;
     const newToken = e.newValue;
     void (async () => {
       try {
-        const r = await fetch("https://api.github.com/user", {
-          headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
-        });
+        const r = await makeUserCheckFetcher(newToken)();
         if (!r.ok) {
-          void r.body?.cancel();
+          discardResponseBody(r);
           return;
         }
-        const data = (await r.json()) as GitHubUser;
+        const data = parseGitHubUserPayload(await r.json());
         if (data && _token() === newToken && _crossTabFetchGen === gen) {
           // Only a CONFIRMED same-user rotation (a known previous login that
           // case-insensitively matches the fetched identity) skips the
@@ -501,7 +893,7 @@ function handleAuthStorage(e: StorageEvent): void {
           if (isSameUserRotation) {
             // Same-identity token rotation — adopt the refreshed user data
             // in place, same as before. Must NOT reset config/view here.
-            setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });
+            setUser(data);
           } else {
             // A different GitHub identity signed in via another tab (e.g.
             // Settings > Replace token in that tab), OR this tab has no

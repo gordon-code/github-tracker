@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { z } from "zod";
+import * as z from "zod/mini";
 import { cachedFetch } from "../stores/cache";
 import { dismissNotificationBySource, pushNotification } from "../lib/errors";
 
@@ -16,6 +16,7 @@ export interface GitHubStatusIncident {
 
 export interface GitHubStatusSummary {
   severity: GitHubStatusSeverity;
+  apiSeverity: GitHubStatusSeverity;
   incidents: GitHubStatusIncident[];
   fetchedAt: Date;
 }
@@ -54,9 +55,11 @@ type RawSummaryResponse = z.infer<typeof RawSummaryResponseSchema>;
 // it with no error, no test failure, and no user-visible signal beyond an
 // incorrectly-green badge during a real outage. Guarded by
 // tests/services/github-status.smoke.test.ts (live network, not part of `pnpm test`).
+export const API_REQUESTS_COMPONENT_NAME = "API Requests";
+
 export const TRACKED_COMPONENT_NAMES = new Set([
   "Actions",
-  "API Requests",
+  API_REQUESTS_COMPONENT_NAME,
   "Git Operations",
   "Issues",
   "Pull Requests",
@@ -119,6 +122,7 @@ function stripHtml(html: string): string {
 function parseSummary(raw: RawSummaryResponse): GitHubStatusSummary {
   const trackedComponents = raw.components.filter((c) => TRACKED_COMPONENT_NAMES.has(c.name));
   let severity = blendSeverity(trackedComponents);
+  const apiSeverity = blendSeverity(raw.components.filter((c) => c.name === API_REQUESTS_COMPONENT_NAME));
 
   const relevantIncidents: GitHubStatusIncident[] = raw.incidents.flatMap((inc) => {
     const affected = inc.components.filter((c) => TRACKED_COMPONENT_NAMES.has(c.name));
@@ -141,7 +145,7 @@ function parseSummary(raw: RawSummaryResponse): GitHubStatusSummary {
     severity = "minor";
   }
 
-  return { severity, incidents: relevantIncidents, fetchedAt: new Date() };
+  return { severity, apiSeverity, incidents: relevantIncidents, fetchedAt: new Date() };
 }
 
 // Side-effecting: consumes a parsed summary and dispatches notification
@@ -189,57 +193,66 @@ export function getGitHubStatus(): GitHubStatusSummary | null {
   return _githubStatus();
 }
 
-let _fetchInProgress = false;
+export function isGitHubApiOutage(): boolean {
+  const apiSeverity = _githubStatus()?.apiSeverity;
+  return apiSeverity === "major" || apiSeverity === "critical";
+}
+
+let _inFlightFetch: Promise<void> | null = null;
 
 // Consecutive-failure gate for the catch block below (CR-002) — see comment there.
 const CONSECUTIVE_FAILURE_THRESHOLD = 3;
 let _consecutiveFailures = 0;
 
-export async function fetchGitHubStatus(): Promise<void> {
-  if (_fetchInProgress) return; // in-flight guard — avoid pile-up if refreshInterval is very short/0 or the endpoint is slow to respond
-  _fetchInProgress = true;
-  try {
-    const { data, fromCache } = await cachedFetch(CACHE_KEY, async (headers) => {
-      const reqHeaders: Record<string, string> = {};
-      if (headers.etag) reqHeaders["If-None-Match"] = headers.etag;
-      const res = await fetch(STATUS_API_URL, {
-        headers: reqHeaders,
-        credentials: "omit",
-        cache: "no-store",
-        signal: AbortSignal.timeout(10_000),
+export function fetchGitHubStatus(): Promise<void> {
+  if (_inFlightFetch !== null) return _inFlightFetch; // single-flight coalescing — concurrent callers await the same probe
+  let inFlight: Promise<void> | null = null;
+  inFlight = (async () => {
+    try {
+      const { data, fromCache } = await cachedFetch(CACHE_KEY, async (headers) => {
+        const reqHeaders: Record<string, string> = {};
+        if (headers.etag) reqHeaders["If-None-Match"] = headers.etag;
+        const res = await fetch(STATUS_API_URL, {
+          headers: reqHeaders,
+          credentials: "omit",
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (res.status === 304) {
+          return { data: null, etag: headers.etag, lastModified: headers.lastModified, status: 304 };
+        }
+        const json = await res.json();
+        return { data: json, etag: res.headers.get("ETag"), lastModified: res.headers.get("Last-Modified"), status: res.status };
       });
-      if (res.status === 304) {
-        return { data: null, etag: headers.etag, lastModified: headers.lastModified, status: 304 };
+
+      if (fromCache && _githubStatus() !== null && _consecutiveFailures === 0) {
+        return;
       }
-      const json = await res.json();
-      return { data: json, etag: res.headers.get("ETag"), lastModified: res.headers.get("Last-Modified"), status: res.status };
-    });
 
-    if (fromCache && _githubStatus() !== null && _consecutiveFailures === 0) {
-      return;
-    }
+      // Validate the raw shape before parsing — catches API drift (e.g. a field
+      // renamed/removed upstream) as a distinct, loud log message instead of an
+      // unexplained TypeError deep inside parseSummary. Treated the same as any
+      // other fetch failure (see recordFetchFailure()).
+      const validated = RawSummaryResponseSchema.safeParse(data);
+      if (!validated.success) {
+        console.warn("[github-status] response schema drift — validation failed:", validated.error);
+        recordFetchFailure();
+        return;
+      }
 
-    // Validate the raw shape before parsing — catches API drift (e.g. a field
-    // renamed/removed upstream) as a distinct, loud log message instead of an
-    // unexplained TypeError deep inside parseSummary. Treated the same as any
-    // other fetch failure (see recordFetchFailure()).
-    const validated = RawSummaryResponseSchema.safeParse(data);
-    if (!validated.success) {
-      console.warn("[github-status] response schema drift — validation failed:", validated.error);
+      const summary = parseSummary(validated.data);
+      notifyTransitions(summary);
+      _setGitHubStatus(summary);
+      _consecutiveFailures = 0;
+    } catch (err) {
+      console.warn("[github-status] fetch failed:", err instanceof Error ? err.message : String(err));
       recordFetchFailure();
-      return;
+    } finally {
+      if (_inFlightFetch === inFlight) _inFlightFetch = null;
     }
-
-    const summary = parseSummary(validated.data);
-    notifyTransitions(summary);
-    _setGitHubStatus(summary);
-    _consecutiveFailures = 0;
-  } catch (err) {
-    console.warn("[github-status] fetch failed:", err instanceof Error ? err.message : String(err));
-    recordFetchFailure();
-  } finally {
-    _fetchInProgress = false;
-  }
+  })();
+  _inFlightFetch = inFlight;
+  return inFlight;
 }
 
 // Best-effort, ancillary external signal — deliberately no pushError, don't
@@ -259,6 +272,7 @@ export async function fetchGitHubStatus(): Promise<void> {
 function recordFetchFailure(): void {
   _consecutiveFailures++;
   if (_consecutiveFailures >= CONSECUTIVE_FAILURE_THRESHOLD) {
+    _setGitHubStatus(null);
     dismissNotificationBySource(NOTIFICATION_SOURCE);
   }
 }
@@ -270,6 +284,6 @@ function recordFetchFailure(): void {
 export function resetGitHubStatusState(): void {
   _previousIncidents = new Map();
   _setGitHubStatus(null);
-  _fetchInProgress = false;
+  _inFlightFetch = null;
   _consecutiveFailures = 0;
 }

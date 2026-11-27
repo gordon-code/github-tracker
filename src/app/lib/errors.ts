@@ -38,14 +38,22 @@ let notificationCounter = 0;
 
 // Cycle tracking for poll reconciliation
 let _cycleTracking: Set<string> | null = null;
+let _activeCycleToken: symbol | null = null;
 
-export function startCycleTracking(): void {
+export function startCycleTracking(): symbol {
+  const token = Symbol("poll-cycle");
+  _activeCycleToken = token;
   _cycleTracking = new Set();
+  return token;
 }
 
-export function endCycleTracking(): Set<string> {
+export function endCycleTracking(token?: symbol): Set<string> {
+  if (token !== undefined && token !== _activeCycleToken) {
+    return new Set();
+  }
   const result = _cycleTracking ?? new Set();
   _cycleTracking = null;
+  _activeCycleToken = null;
   return result;
 }
 
@@ -114,8 +122,43 @@ export function pushError(source: string, message: string, retryable = false): v
   pushNotification(source, message, "error", retryable);
 }
 
+const _dismissListeners = new Map<string, Set<() => void>>();
+
+export function onNotificationDismissed(source: string, cb: () => void): () => void {
+  let listeners = _dismissListeners.get(source);
+  if (!listeners) {
+    listeners = new Set();
+    _dismissListeners.set(source, listeners);
+  }
+  listeners.add(cb);
+  return () => {
+    const current = _dismissListeners.get(source);
+    if (!current) return;
+    current.delete(cb);
+    if (current.size === 0) {
+      _dismissListeners.delete(source);
+    }
+  };
+}
+
+function notifyDismissListeners(source: string): void {
+  const listeners = _dismissListeners.get(source);
+  if (!listeners || listeners.size === 0) return;
+  for (const cb of Array.from(listeners)) {
+    try {
+      cb();
+    } catch {
+      // Listener errors must never break notification dismissal
+    }
+  }
+}
+
 export function dismissError(id: string): void {
+  const removed = notifications().find((n) => n.id === id);
   setNotifications((prev) => prev.filter((n) => n.id !== id));
+  if (removed) {
+    notifyDismissListeners(removed.source);
+  }
 }
 
 export function dismissNotificationBySource(source: string): void {
@@ -145,6 +188,16 @@ const [_mutedSources, _setMutedSources] = createSignal(new Set<string>());
 
 export function addMutedSource(source: string): void {
   _setMutedSources((prev) => new Set([...prev, source]));
+  notifyDismissListeners(source);
+}
+
+export function removeMutedSource(source: string): void {
+  _setMutedSources((prev) => {
+    if (!prev.has(source)) return prev;
+    const next = new Set(prev);
+    next.delete(source);
+    return next;
+  });
 }
 
 export function isMuted(source: string): boolean {
@@ -162,6 +215,8 @@ export function clearNotifications(): void {
 export function resetNotificationState(): void {
   setNotifications([]);
   clearMutedSources();
+  _cycleTracking = null;
+  _activeCycleToken = null;
 }
 
 // Backward-compat alias

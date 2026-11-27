@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getErrors,
   getNotifications,
@@ -7,6 +7,7 @@ import {
   pushNotification,
   dismissError,
   dismissNotificationBySource,
+  onNotificationDismissed,
   markAllAsRead,
   clearErrors,
   clearNotifications,
@@ -14,6 +15,7 @@ import {
   startCycleTracking,
   endCycleTracking,
   addMutedSource,
+  removeMutedSource,
   isMuted,
   clearMutedSources,
   isSafeInternalHref,
@@ -429,6 +431,29 @@ describe("cycle tracking", () => {
       dispose();
     });
   });
+
+  it("STRUCT-003: startCycleTracking returns opaque token and endCycleTracking(staleToken) does not clear a newer cycle", () => {
+    createRoot((dispose) => {
+      const staleToken = startCycleTracking();
+      expect(typeof staleToken).toBe("symbol");
+      pushNotification("a", "msg1", "info");
+
+      const activeToken = startCycleTracking();
+      expect(activeToken).not.toBe(staleToken);
+      pushNotification("b", "msg2", "warning");
+
+      // Stale cycle ending must not clobber the newer cycle's tracking set
+      const staleResult = endCycleTracking(staleToken);
+      expect(staleResult.size).toBe(0);
+
+      pushNotification("c", "msg3", "error");
+      const activeResult = endCycleTracking(activeToken);
+      expect(activeResult.has("b")).toBe(true);
+      expect(activeResult.has("c")).toBe(true);
+      expect(activeResult.has("a")).toBe(false);
+      dispose();
+    });
+  });
 });
 
 describe("resetNotificationState", () => {
@@ -466,6 +491,122 @@ describe("mutedSources", () => {
       clearMutedSources();
       expect(isMuted("api")).toBe(false);
       expect(isMuted("search")).toBe(false);
+      dispose();
+    });
+  });
+
+  it("QA-001/STRUCT-004/STRUCT-101: removeMutedSource unmutes only the specified source", () => {
+    createRoot((dispose) => {
+      addMutedSource("pat-expiry");
+      addMutedSource("search");
+      expect(isMuted("pat-expiry")).toBe(true);
+      expect(isMuted("search")).toBe(true);
+
+      removeMutedSource("pat-expiry");
+      expect(isMuted("pat-expiry")).toBe(false);
+      expect(isMuted("search")).toBe(true);
+
+      // Safe no-op for non-muted source
+      expect(() => removeMutedSource("nonexistent")).not.toThrow();
+      dispose();
+    });
+  });
+});
+
+describe("onNotificationDismissed", () => {
+  it("fires on dismissError(id) when id exists and does not fire for unknown id", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+
+      dismissError("nonexistent-id");
+      expect(cb).not.toHaveBeenCalled();
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      const id = getNotifications()[0].id;
+      dismissError(id);
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      unsub();
+      dispose();
+    });
+  });
+
+  it("fires on addMutedSource(source) for matching source only", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+
+      addMutedSource("other-source");
+      expect(cb).not.toHaveBeenCalled();
+
+      addMutedSource("pat-expiry");
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      unsub();
+      dispose();
+    });
+  });
+
+  it("stops firing after unsubscribe", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+      unsub();
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      dismissError(getNotifications()[0].id);
+      addMutedSource("pat-expiry");
+      expect(cb).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("handles throwing and self-unsubscribing listeners safely", () => {
+    createRoot((dispose) => {
+      const secondCb = vi.fn();
+      let selfUnsub: (() => void) | undefined;
+      selfUnsub = onNotificationDismissed("pat-expiry", () => {
+        selfUnsub?.();
+      });
+      const unsubThrowing = onNotificationDismissed("pat-expiry", () => {
+        throw new Error("listener boom");
+      });
+      const unsubSecond = onNotificationDismissed("pat-expiry", secondCb);
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      expect(() => dismissError(getNotifications()[0].id)).not.toThrow();
+      expect(secondCb).toHaveBeenCalledTimes(1);
+
+      // Self-unsubscribed listener should not fire a second time; secondCb still fires
+      addMutedSource("pat-expiry");
+      expect(secondCb).toHaveBeenCalledTimes(2);
+
+      unsubThrowing();
+      unsubSecond();
+      dispose();
+    });
+  });
+
+  it("does NOT fire on dismissNotificationBySource() or resetNotificationState(), and listeners survive resetNotificationState()", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      dismissNotificationBySource("pat-expiry");
+      expect(cb).not.toHaveBeenCalled();
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      resetNotificationState();
+      expect(cb).not.toHaveBeenCalled();
+
+      // Listener survives resetNotificationState()
+      pushNotification("pat-expiry", "Expiring again", "warning");
+      dismissError(getNotifications()[0].id);
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      unsub();
       dispose();
     });
   });

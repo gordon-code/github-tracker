@@ -521,4 +521,85 @@ describe("fetchDashboardIssueBodies — hung request timeout", () => {
       vi.useRealTimers();
     }
   });
+
+  it("short-circuits on 401 returning { bodies, failedIds, unauthorized: true } without calling captureException, polluting failedIds, or changing _consecutiveBodyFetchFailures", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      resetBodyFetchFailures("dashboardBodies");
+      const failingOctokit = makeOctokit(async () => {
+        throw Object.assign(new Error("502"), { status: 502 });
+      });
+      vi.mocked(getClient).mockReturnValue(failingOctokit);
+
+      // Accumulate 2 consecutive failures (below threshold 3)
+      await fetchDashboardIssueBodies(failingOctokit, ["N_0"]);
+      await fetchDashboardIssueBodies(failingOctokit, ["N_0"]);
+      expect(pushNotification).not.toHaveBeenCalled();
+
+      // Now pass 2 batches (30 ids -> 2 batches of 25 + 5): first batch throws 401,
+      // second batch short-circuits on sawUnauthorized.
+      const ids = Array.from({ length: BODY_FETCH_BATCH_SIZE + 5 }, (_, i) => `N_${i}`);
+      const octokit401 = makeOctokit(async () => {
+        throw Object.assign(new Error("Bad credentials"), { status: 401 });
+      });
+      vi.mocked(getClient).mockReturnValue(octokit401);
+      vi.mocked(captureException).mockClear();
+      vi.mocked(dismissNotificationBySource).mockClear();
+
+      const res401 = await fetchDashboardIssueBodies(octokit401, ids);
+      expect(res401.unauthorized).toBe(true);
+      expect(res401.bodies.size).toBe(0);
+      expect(res401.failedIds.size).toBe(0);
+      expect(captureException).not.toHaveBeenCalled();
+      expect(dismissNotificationBySource).not.toHaveBeenCalled();
+      expect(pushNotification).not.toHaveBeenCalled();
+
+      // _consecutiveBodyFetchFailures remained at 2 (neither incremented nor reset),
+      // so 1 more non-401 failure reaches threshold 3 and pushes notification.
+      vi.mocked(getClient).mockReturnValue(failingOctokit);
+      await fetchDashboardIssueBodies(failingOctokit, ["N_0"]);
+      expect(pushNotification).toHaveBeenCalledTimes(1);
+    } finally {
+      resetBodyFetchFailures("dashboardBodies");
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("defuses raceWithTimeout when request.onUnauthorized() fires on a 401 pending past GRAPHQL_BODY_FETCH_TIMEOUT_MS", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      let rejectGraphql!: (err: unknown) => void;
+      const octokit = makeOctokit((_query: string, variables: unknown) => {
+        const { request } = variables as { request?: { onUnauthorized?: () => void } };
+        // Simulate github.ts invoking request.onUnauthorized() as soon as 401 arrives
+        // while handleRuntimeUnauthorized is still awaiting 3x verification past 45s.
+        setTimeout(() => {
+          request?.onUnauthorized?.();
+        }, 100);
+        return new Promise((_resolve, reject) => {
+          rejectGraphql = reject;
+        });
+      });
+      vi.mocked(getClient).mockReturnValue(octokit);
+
+      const resultPromise = fetchDashboardIssueBodies(octokit, ["N_1"]);
+
+      // Advance past onUnauthorized() (100ms) and past GRAPHQL_BODY_FETCH_TIMEOUT_MS (45s)
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS + 5_000);
+      expect(captureException).not.toHaveBeenCalled();
+
+      // Now handleRuntimeUnauthorized settles and github.ts rethrows the 401
+      rejectGraphql(Object.assign(new Error("Bad credentials"), { status: 401 }));
+      const result = await resultPromise;
+
+      expect(result.unauthorized).toBe(true);
+      expect(result.bodies.size).toBe(0);
+      expect(result.failedIds.size).toBe(0);
+      expect(captureException).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });

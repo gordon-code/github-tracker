@@ -32,7 +32,8 @@ import {
   StaleIdentityError,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, identityEpoch, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { user, onAuthCleared, identityEpoch, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { isUnauthorizedError } from "../../lib/http-errors";
 import { loadSnapshot, writeSnapshot, type DashboardSnapshotState } from "../../lib/dashboard-snapshot";
 import { JiraApiError } from "../../services/jira-client";
 import { createJiraClient, mergeCustomFields, jiraJqlForScope } from "../../lib/jira-utils";
@@ -41,8 +42,10 @@ import { detectAndLookupJiraKeys } from "../../services/jira-keys";
 import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification, pushError, dismissNotificationBySource, getNotifications } from "../../lib/errors";
+import { checkPatExpiryReminder } from "../../lib/pat-expiry";
 import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
+import { isGitHubApiOutage } from "../../services/github-status";
 import { canApprovePR, canMarkPRReady, formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { Tooltip } from "../shared/Tooltip";
@@ -519,20 +522,6 @@ async function pollFetch(force = false): Promise<DashboardData> {
     if (fetchEpoch !== identityEpoch()) {
       throw err instanceof StaleIdentityError ? err : new StaleIdentityError();
     }
-    // Handle 401 auth errors
-    const status =
-      typeof err === "object" &&
-      err !== null &&
-      typeof (err as Record<string, unknown>)["status"] === "number"
-        ? (err as Record<string, unknown>)["status"]
-        : null;
-
-    if (status === 401) {
-      // Token invalid — clear token only, preserve user config/view/dashboard.
-      // Hard redirect forces a full page reload, clearing module-level state.
-      expireToken();
-      window.location.replace("/login");
-    }
     setDashboardData("loading", false);
     throw err;
   }
@@ -1006,7 +995,11 @@ export default function DashboardPage() {
     }
 
     if (!_coordinator()) {
-      _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
+      _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch, {
+        onOutagePaused: () => {
+          if (dashboardData.loading) setDashboardData("loading", false);
+        },
+      }));
     }
 
     if (!_eventsCoordinator()) {
@@ -1088,7 +1081,7 @@ export default function DashboardPage() {
     // after re-auth, scope changes, or org policy updates.
     // Only adds orgs to the filter list — repos are user-selected via Settings.
     const client = getClient();
-    if (client && config.onboardingComplete) {
+    if (client && config.onboardingComplete && !isGitHubApiOutage()) {
       void (async () => {
         try {
           const allOrgs = await fetchOrgs(client);
@@ -1134,6 +1127,38 @@ export default function DashboardPage() {
       if (_eventsCoordinator() === eventsCoord) _setEventsCoordinator(null);
       clearHotSets();
       clearInterval(clockInterval);
+    });
+  });
+
+  createEffect(() => {
+    const authMethod = config.authMethod;
+    const patExpiresAt = config.patExpiresAt;
+    checkPatExpiryReminder(authMethod, patExpiresAt);
+    if (authMethod !== "pat" || patExpiresAt === null) return;
+
+    let disposed = false;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    const scheduleNextMidnightCheck = () => {
+      const now = new Date();
+      const nextMidnight = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        0,
+        0,
+        1
+      );
+      const delayMs = Math.max(1_000, nextMidnight.getTime() - now.getTime());
+      timerId = setTimeout(() => {
+        if (disposed) return;
+        checkPatExpiryReminder(authMethod, patExpiresAt);
+        scheduleNextMidnightCheck();
+      }, delayMs);
+    };
+    scheduleNextMidnightCheck();
+    onCleanup(() => {
+      disposed = true;
+      if (timerId !== undefined) clearTimeout(timerId);
     });
   });
 
@@ -1491,8 +1516,9 @@ export default function DashboardPage() {
 
   // Renovate Dashboard issue body fetch: fires after each full refresh cycle
   createEffect(on(
-    () => _coordinator()?.lastRefreshAt(),
-    () => {
+    [() => _coordinator()?.lastRefreshAt(), isGitHubApiOutage] as const,
+    ([lastRefresh, apiOutage]) => {
+      if (!lastRefresh || apiOutage) return;
       if (!config.dependencies.enabled) return;
       if (_fetchingDashboardBodies) return;
       const octokit = getClient();
@@ -1539,11 +1565,11 @@ export default function DashboardPage() {
 
           let failedCount = 0;
           if (toFetch.length > 0) {
-            const { bodies: bodyMap, failedIds } = await fetchDashboardIssueBodies(
+            const { bodies: bodyMap, failedIds, unauthorized } = await fetchDashboardIssueBodies(
               octokit,
               toFetch.map((di) => di.nodeId)
             );
-            if (authGen !== identityEpoch() || getClient() !== octokit) return;
+            if (authGen !== identityEpoch() || getClient() !== octokit || unauthorized) return;
             failedCount = failedIds.size;
             let cacheUpdated = false;
             for (const di of toFetch) {
@@ -1602,12 +1628,14 @@ export default function DashboardPage() {
   // Parses bodies immediately into VersionInfo and persists to localStorage so
   // classification survives page refresh without visual jank.
   createEffect(() => {
-    if (!config.dependencies.enabled) return;
+    const depsEnabled = config.dependencies.enabled;
     const meta = depMeta();
     const depPrs = dependencyPullRequests();
     const visibleDepPrs = visibleDependencyPullRequests();
     const enrichmentPending = awaitingEnrichment();
     void dashboardData.lastRefreshedAt;
+    const apiOutage = isGitHubApiOutage();
+    if (!depsEnabled || apiOutage) return;
     if (_fetchingDepBodies) {
       console.debug("[dashboard] depBodies effect: skipped — fetch already in flight");
       return;
@@ -1646,8 +1674,8 @@ export default function DashboardPage() {
     void (async () => {
       try {
         const nodeIds = toFetch.map((pr) => pr.nodeId!);
-        const { bodies: bodyMap, failedIds } = await fetchDepPRBodies(octokit, nodeIds);
-        if (authGen !== identityEpoch() || getClient() !== octokit) return;
+        const { bodies: bodyMap, failedIds, unauthorized } = await fetchDepPRBodies(octokit, nodeIds);
+        if (authGen !== identityEpoch() || getClient() !== octokit || unauthorized) return;
         console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size, failed: failedIds.size });
 
         // Record/clear per-PR cooldown so a batch that errored or timed out isn't
@@ -1759,13 +1787,8 @@ export default function DashboardPage() {
     source: string,
     permissionDeniedMsg: string
   ): boolean {
-    const status =
-      typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
-        ? ((err as Record<string, unknown>).status as number)
-        : null;
-    if (status === 401) {
-      expireToken();
-      window.location.replace("/login");
+    if (isUnauthorizedError(err)) {
+      pushNotification(source, "GitHub returned an authentication error — please try again", "error");
       return true;
     }
     if (isPermissionDeniedError(err)) {

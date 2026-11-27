@@ -115,6 +115,10 @@ describe("bundle module separation & anti-bloat guardrails", () => {
       (spec: string) => /(?:^|\/)services\/github$/.test(spec),
       (spec: string) => /(?:^|\/)lib\/mcp-relay$/.test(spec),
       (spec: string) => /(?:^|\/)(?:lib\/)?settings-transfer$/.test(spec),
+      // 401 verification, GitHub status, and PAT reminders never run on a healthy boot.
+      (spec: string) => /(?:^|\/)(?:stores\/)?auth-401$/.test(spec),
+      (spec: string) => /(?:^|\/)services\/github-status$/.test(spec),
+      (spec: string) => /(?:^|\/)(?:lib\/)?pat-expiry$/.test(spec),
     ];
 
     function resolveLocalModule(fromRelPath: string, specifier: string): string | null {
@@ -139,7 +143,8 @@ describe("bundle module separation & anti-bloat guardrails", () => {
     }
 
     const discoveredBootFiles = new Set<string>();
-    const queue: string[] = ["src/app/index.tsx"];
+    // LoginPage is a lazy route chunk, but the login path must stay as lean as boot itself.
+    const queue: string[] = ["src/app/index.tsx", "src/app/pages/LoginPage.tsx"];
     while (queue.length > 0) {
       const current = queue.shift()!;
       if (discoveredBootFiles.has(current)) continue;

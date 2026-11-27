@@ -179,6 +179,9 @@ const forbiddenBootPatterns = [
   { re: /src\/app\/components\/shared\/CustomTabModal\.tsx$/, label: "CustomTabModal must be lazy-loaded" },
   { re: /node_modules\/.*zod\/v4\/classic\//, label: "classic zod runtime must not be in boot chunks; use zod/mini" },
   { re: /node_modules\/.*zod\/v4\/core\/to-json-schema\.js$/, label: "Zod JSON Schema converter must not be in boot chunks" },
+  { re: /src\/app\/stores\/auth-401\.ts$/, label: "auth-401 verifier must be loaded only after a 401" },
+  { re: /src\/app\/services\/github-status\.ts$/, label: "github-status must be deferred off boot path" },
+  { re: /src\/app\/lib\/pat-expiry\.ts$/, label: "pat-expiry must be deferred off boot path" },
 ];
 
 for (const rule of forbiddenBootPatterns) {
@@ -235,6 +238,23 @@ for (const budget of sizeBudgets) {
     console.error(`[FAIL] ${budget.name}: gzip-9 ${fmtKb(budget.actual)} exceeds budget ${fmtKb(budget.max)}`);
   } else {
     console.log(`[PASS] ${budget.name}: gzip-9 ${fmtKb(budget.actual)} <= budget ${fmtKb(budget.max)}`);
+  }
+}
+
+// Ratchet: the absolute budgets above leave headroom, so growth can pass unnoticed. Boot JS may
+// not grow more than toleranceBytes over the committed baseline; lowering or raising the baseline
+// is a deliberate, reviewable edit to scripts/bundle-baseline.json.
+const baselinePath = path.join("scripts", "bundle-baseline.json");
+const baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
+const bootDelta = bootGzipBytes - baseline.combinedBootGzipBytes;
+const bootDeltaLabel = `${bootDelta >= 0 ? "+" : ""}${bootDelta} B vs baseline ${fmtKb(baseline.combinedBootGzipBytes)}`;
+if (bootDelta > baseline.toleranceBytes) {
+  failed = true;
+  console.error(`[FAIL] Boot JS ratchet: ${bootDeltaLabel} exceeds tolerance ${baseline.toleranceBytes} B — shrink the boot path or update ${baselinePath} with justification`);
+} else {
+  console.log(`[PASS] Boot JS ratchet: ${bootDeltaLabel} (tolerance ${baseline.toleranceBytes} B)`);
+  if (bootDelta < -baseline.toleranceBytes) {
+    console.log(`       Boot JS shrank — lower combinedBootGzipBytes in ${baselinePath} to ${bootGzipBytes} to lock in the gain.`);
   }
 }
 

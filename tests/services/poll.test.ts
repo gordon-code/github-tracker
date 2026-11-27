@@ -34,8 +34,10 @@ vi.mock("../../src/app/lib/errors", () => ({
   clearNotifications: vi.fn(),
   resetNotificationState: vi.fn(),
   addMutedSource: vi.fn(),
+  removeMutedSource: vi.fn(),
   isMuted: vi.fn(() => false),
   clearMutedSources: vi.fn(),
+  onNotificationDismissed: vi.fn(() => vi.fn()),
 }));
 
 // Mock notifications so doFetch doesn't fail on detectNewItems
@@ -55,17 +57,44 @@ vi.mock("../../src/app/services/github", () => ({
 
 // Mock github-status module — fetchGitHubStatus runs concurrently (fire-and-forget)
 // in doFetch, same pattern as fetchRateLimitDetails above.
+const [mockApiOutage, setMockApiOutage] = createSignal(false);
 vi.mock("../../src/app/services/github-status", () => ({
   fetchGitHubStatus: vi.fn(() => Promise.resolve()),
+  isGitHubApiOutage: vi.fn(() => mockApiOutage()),
+  getGitHubStatus: vi.fn(() => null),
+}));
+
+vi.mock("../../src/app/lib/sentry-facade", () => ({
+  captureException: vi.fn(),
+}));
+
+const mockClearAuthOutageSuspension = vi.fn();
+vi.mock("../../src/app/stores/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/stores/auth")>();
+  return {
+    ...actual,
+    clearAuthOutageSuspension: (...args: unknown[]) => {
+      mockClearAuthOutageSuspension(...args);
+      return actual.clearAuthOutageSuspension();
+    },
+  };
+});
+
+const mockCheckPatExpiryReminder = vi.fn();
+vi.mock("../../src/app/lib/pat-expiry", () => ({
+  checkPatExpiryReminder: (...args: unknown[]) => mockCheckPatExpiryReminder(...args),
 }));
 
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
+const mockConfig = vi.hoisted(() => ({
+  selectedRepos: [] as unknown[],
+  maxWorkflowsPerRepo: 5,
+  maxRunsPerWorkflow: 3,
+  authMethod: "oauth" as "oauth" | "pat",
+  patExpiresAt: null as string | null,
+}));
 vi.mock("../../src/app/stores/config", () => ({
-  config: {
-    selectedRepos: [],
-    maxWorkflowsPerRepo: 5,
-    maxRunsPerWorkflow: 3,
-  },
+  config: mockConfig,
 }));
 
 async function flushPromises(): Promise<void> {
@@ -119,12 +148,21 @@ describe("createPollCoordinator", () => {
       configurable: true,
     });
     // Reset mock functions
+    setMockApiOutage(false);
+    vi.mocked(githubStatusMod.isGitHubApiOutage).mockImplementation(() => mockApiOutage());
+    vi.mocked(githubStatusMod.getGitHubStatus).mockReset().mockReturnValue(null);
+    vi.mocked(githubStatusMod.fetchGitHubStatus).mockReset().mockResolvedValue(undefined);
+    mockClearAuthOutageSuspension.mockClear();
+    vi.mocked(githubMod.fetchRateLimitDetails).mockClear();
     mockPushError.mockClear();
     mockPushNotification.mockClear();
     mockDismissNotificationBySource.mockClear();
     mockStartCycleTracking.mockClear();
     mockEndCycleTracking.mockClear().mockReturnValue(new Set<string>());
     mockGetNotifications.mockClear().mockReturnValue([]);
+    mockCheckPatExpiryReminder.mockClear();
+    mockConfig.authMethod = "oauth";
+    mockConfig.patExpiresAt = null;
   });
 
   afterEach(() => {
@@ -1100,6 +1138,494 @@ describe("createPollCoordinator", () => {
 
       coordinator.destroy();
       dispose();
+    });
+  });
+
+  it("exits silently on epoch-mismatched raw 401 without pushing errors or calling captureException", async () => {
+    const authMod = await import("../../src/app/stores/auth");
+    const sentryMod = await import("../../src/app/lib/sentry-facade");
+    vi.mocked(sentryMod.captureException).mockClear();
+    mockPushError.mockClear();
+    mockPushNotification.mockClear();
+
+    const fetchAll = vi.fn().mockImplementation(async () => {
+      authMod.expireToken();
+      throw Object.assign(new Error("Bad credentials"), { status: 401 });
+    });
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(mockPushNotification).not.toHaveBeenCalled();
+      expect(sentryMod.captureException).not.toHaveBeenCalled();
+      expect(coordinator.isRefreshing()).toBe(false);
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("preserved same-epoch 401 skips captureException, suppresses toast during outage, and pushes sanitized transient warning outside outage", async () => {
+    const sentryMod = await import("../../src/app/lib/sentry-facade");
+    const fetchAll = vi.fn().mockRejectedValue(Object.assign(new Error("Bad credentials"), { status: 401 }));
+
+    // 1. Outage active -> manual refresh 401 suppresses error toast and skips captureException
+    vi.mocked(sentryMod.captureException).mockClear();
+    mockPushError.mockClear();
+    setMockApiOutage(true);
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+      coordinator.manualRefresh();
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(sentryMod.captureException).not.toHaveBeenCalled();
+
+      coordinator.destroy();
+      dispose();
+    });
+
+    // 2. Outside outage -> pushes sanitized transient warning and skips captureException
+    vi.mocked(sentryMod.captureException).mockClear();
+    mockPushError.mockClear();
+    setMockApiOutage(false);
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(mockPushError).toHaveBeenCalledWith(
+        "poll",
+        "GitHub authentication check failed temporarily — will retry",
+        true
+      );
+      expect(sentryMod.captureException).not.toHaveBeenCalled();
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("pauses scheduled doFetch(false) during API outage, probes status, invokes onOutagePaused, and preserves notifications", async () => {
+    setMockApiOutage(true);
+    const fetchAll = makeFetchAll();
+    const onOutagePaused = vi.fn();
+    mockGetNotifications.mockReturnValue([
+      { id: "n1", source: "owner/repo", message: "Existing", severity: "warning", timestamp: Date.now(), retryable: true, read: false },
+    ]);
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll, { onOutagePaused });
+      await flushPromises();
+
+      expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+      expect(onOutagePaused).toHaveBeenCalledTimes(1);
+      expect(fetchAll).not.toHaveBeenCalled();
+      expect(githubMod.fetchRateLimitDetails).not.toHaveBeenCalled();
+      expect(coordinator.isRefreshing()).toBe(false);
+      expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("skips overlapping doFetch(false) triggers while statusProbeInFlight is true", async () => {
+    setMockApiOutage(true);
+    let resolveProbe!: () => void;
+    vi.mocked(githubStatusMod.fetchGitHubStatus).mockImplementation(
+      () => new Promise<void>((r) => { resolveProbe = r; }),
+    );
+    const fetchAll = makeFetchAll();
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // jitter = 0
+
+    try {
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
+        await Promise.resolve();
+        expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+
+        // Interval tick while first probe is still in flight
+        vi.advanceTimersByTime(60_000);
+        await Promise.resolve();
+        expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+
+        resolveProbe();
+        await flushPromises();
+        expect(fetchAll).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it("auto-resumes fetchAll(false) on the same tick when fetchGitHubStatus clears outage without double-probing", async () => {
+    setMockApiOutage(true);
+    vi.mocked(githubStatusMod.fetchGitHubStatus).mockImplementation(async () => {
+      setMockApiOutage(false);
+    });
+    const fetchAll = makeFetchAll();
+    const onOutagePaused = vi.fn();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll, { onOutagePaused });
+      await flushPromises();
+
+      expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+      expect(onOutagePaused).not.toHaveBeenCalled();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(fetchAll).toHaveBeenCalledWith(false);
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("manual refresh doFetch(true) bypasses outage pause without invoking onOutagePaused", async () => {
+    setMockApiOutage(true);
+    const fetchAll = makeFetchAll();
+    const onOutagePaused = vi.fn();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll, { onOutagePaused });
+      await flushPromises();
+      expect(fetchAll).not.toHaveBeenCalled();
+      expect(onOutagePaused).toHaveBeenCalledTimes(1);
+
+      vi.mocked(githubStatusMod.fetchGitHubStatus).mockClear();
+      onOutagePaused.mockClear();
+
+      coordinator.manualRefresh();
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(fetchAll).toHaveBeenCalledWith(true);
+      expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+      expect(onOutagePaused).not.toHaveBeenCalled();
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("manual doFetch(true) during an awaiting statusProbeInFlight runs immediately and background tick does not double-fetch", async () => {
+    setMockApiOutage(true);
+    let resolveProbe!: () => void;
+    vi.mocked(githubStatusMod.fetchGitHubStatus)
+      .mockImplementationOnce(() => new Promise<void>((r) => { resolveProbe = r; }))
+      .mockResolvedValue(undefined);
+    const fetchAll = makeFetchAll();
+    const onOutagePaused = vi.fn();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll, { onOutagePaused });
+      await Promise.resolve();
+      expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+
+      // Manual refresh invoked while background probe is still awaiting; completes first
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(fetchAll).toHaveBeenCalledWith(true);
+
+      // Now background probe resolves (even if outage cleared), background tick must not double-fetch
+      setMockApiOutage(false);
+      resolveProbe();
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(onOutagePaused).not.toHaveBeenCalled();
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  describe("refreshInterval === 0 outage-recovery probe", () => {
+    it("schedules 60s setTimeout (never setInterval), skips when hidden/offline, stops on recovery, and cleans up on destroy", async () => {
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+      setMockApiOutage(true);
+      const fetchAll = makeFetchAll();
+
+      try {
+        await createRoot(async (dispose) => {
+          const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+          await flushPromises();
+          expect(setIntervalSpy).not.toHaveBeenCalled();
+          expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+          expect(fetchAll).not.toHaveBeenCalled();
+
+          // Hidden: 60s tick skips network call but re-arms
+          setDocumentVisible(false);
+          vi.advanceTimersByTime(60_000);
+          await flushPromises();
+          expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+
+          // Offline (while visible): 60s tick skips network call but re-arms
+          setDocumentVisible(true);
+          Object.defineProperty(navigator, "onLine", { value: false, writable: true, configurable: true });
+          vi.advanceTimersByTime(60_000);
+          await flushPromises();
+          expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+
+          // Online + visible: 60s tick probes fetchGitHubStatus without calling fetchAll
+          Object.defineProperty(navigator, "onLine", { value: true, writable: true, configurable: true });
+          vi.advanceTimersByTime(60_000);
+          await flushPromises();
+          expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(2);
+          expect(fetchAll).not.toHaveBeenCalled();
+
+          // Recovery: fetchGitHubStatus clears outage -> stops probing
+          vi.mocked(githubStatusMod.fetchGitHubStatus).mockImplementationOnce(async () => {
+            setMockApiOutage(false);
+          });
+          vi.advanceTimersByTime(60_000);
+          await flushPromises();
+          expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(3);
+
+          vi.advanceTimersByTime(120_000);
+          await flushPromises();
+          expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(3);
+
+          // Re-entering outage arms probe again; destroy() cleans it up
+          setMockApiOutage(true);
+          await Promise.resolve();
+          coordinator.destroy();
+          vi.advanceTimersByTime(120_000);
+          await flushPromises();
+          expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(3);
+
+          dispose();
+        });
+      } finally {
+        setIntervalSpy.mockRestore();
+      }
+    });
+
+    it("re-arms 60s timer when racing with manual doFetch(true) while outage persists", async () => {
+      setMockApiOutage(true);
+      let resolveProbe!: () => void;
+      vi.mocked(githubStatusMod.fetchGitHubStatus)
+        .mockImplementationOnce(() => new Promise<void>((r) => { resolveProbe = r; }))
+        .mockResolvedValue(undefined);
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await Promise.resolve();
+
+        // Manual refresh races with initial awaiting doFetch(false) probe
+        coordinator.manualRefresh();
+        await flushPromises();
+        expect(fetchAll).toHaveBeenCalledTimes(1);
+
+        // Initial probe settles while outage still persists -> 60s timer must stay armed
+        resolveProbe();
+        await flushPromises();
+
+        vi.mocked(githubStatusMod.fetchGitHubStatus).mockClear();
+        vi.advanceTimersByTime(60_000);
+        await flushPromises();
+        expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(1);
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("re-arms 60s timer when a runOutageProbe() tick overlaps an in-flight statusProbeInFlight", async () => {
+      setMockApiOutage(true);
+      let resolveProbe!: () => void;
+      vi.mocked(githubStatusMod.fetchGitHubStatus)
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(() => new Promise<void>((r) => { resolveProbe = r; }))
+        .mockResolvedValue(undefined);
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises(); // initial doFetch(false) completes & schedules 60s probe
+
+        // Trigger a second doFetch(false) via visibility wake that leaves statusProbeInFlight = true
+        setDocumentVisible(false);
+        vi.advanceTimersByTime(125_000);
+        setDocumentVisible(true);
+        // Wake timer is WAKE_GRACE_MS (2s), while the 60s outage probe is already scheduled at t=60s.
+        // Wait: instead, let's advance to t=60s? No, wake fires at 2s.
+        // At t=125s + 2s, wake fires doFetch(false) -> starts probe #2 (hangs).
+        // Actually, the 60s timer fired at t=60s while hidden (skipped & re-armed for t=120s),
+        // then at t=180s it fires while probe #2 is still in flight!
+        vi.advanceTimersByTime(2_000);
+        await Promise.resolve(); // probe #2 now in flight
+        expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(2);
+
+        // Advance past the next 60s outage probe tick while probe #2 is still in flight
+        vi.advanceTimersByTime(60_000);
+        await Promise.resolve();
+        // Should not start a 3rd overlapping probe, AND must re-arm the 60s timer
+        expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(2);
+
+        resolveProbe();
+        await flushPromises();
+
+        // Next 60s tick fires probe #3 (proving the timer was re-armed)
+        vi.advanceTimersByTime(60_000);
+        await flushPromises();
+        expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(3);
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+  });
+
+  describe("PAT expiry reminder checks", () => {
+    it("doFetch() invokes checkPatExpiryReminder even when offline", async () => {
+      mockConfig.authMethod = "pat";
+      mockConfig.patExpiresAt = "2026-12-01";
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
+        await flushPromises();
+
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledWith("pat", "2026-12-01");
+        expect(fetchAll).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("doFetch() invokes checkPatExpiryReminder even when paused for a GitHub API outage", async () => {
+      mockConfig.authMethod = "pat";
+      mockConfig.patExpiresAt = "2026-11-28";
+      setMockApiOutage(true);
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
+        await flushPromises();
+
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledWith("pat", "2026-11-28");
+        expect(fetchAll).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("visibilitychange -> visible invokes checkPatExpiryReminder even when hidden < 2 minutes and in manual mode (refreshInterval === 0)", async () => {
+      mockConfig.authMethod = "pat";
+      mockConfig.patExpiresAt = "2026-11-27";
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+        mockCheckPatExpiryReminder.mockClear();
+        fetchAll.mockClear();
+
+        setDocumentVisible(false);
+        vi.advanceTimersByTime(30_000); // hidden < 2 minutes
+        setDocumentVisible(true);
+
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledTimes(1);
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledWith("pat", "2026-11-27");
+        // Manual mode + < 2 min hidden must not trigger a network fetch
+        expect(fetchAll).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("STRUCT-001: calls clearAuthOutageSuspension() on true -> false outage transition only when getGitHubStatus() is non-null", async () => {
+      const fetchAll = makeFetchAll();
+
+      // 1. Transition true -> false with non-null status -> calls clearAuthOutageSuspension()
+      setMockApiOutage(true);
+      vi.mocked(githubStatusMod.getGitHubStatus).mockReturnValue({
+        indicator: "none",
+        description: "All Systems Operational",
+        affectedComponents: [],
+      } as never);
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+
+        setMockApiOutage(false);
+        expect(mockClearAuthOutageSuspension).toHaveBeenCalledTimes(1);
+
+        coordinator.destroy();
+        dispose();
+      });
+
+      // 2. Transition true -> false with null status (3-failure reset) -> does NOT call clearAuthOutageSuspension()
+      mockClearAuthOutageSuspension.mockClear();
+      setMockApiOutage(true);
+      vi.mocked(githubStatusMod.getGitHubStatus).mockReturnValue(null);
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+
+        setMockApiOutage(false);
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("preserves wasApiOutage across transient status === null (3x githubstatus failure) and clears suspension when operational status returns", async () => {
+      const fetchAll = makeFetchAll();
+      const [mockStatus, setMockStatus] = createSignal<unknown>({
+        indicator: "major",
+        description: "Major Outage",
+        affectedComponents: [],
+      });
+
+      setMockApiOutage(true);
+      vi.mocked(githubStatusMod.getGitHubStatus).mockImplementation(() => mockStatus() as never);
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+
+        // 3x githubstatus failure resets status to null and flips isGitHubApiOutage() to false
+        setMockStatus(null);
+        setMockApiOutage(false);
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+
+        // When operational status later returns (non-null, currentOutage stays false),
+        // suspension MUST clear because wasApiOutage was preserved across status === null
+        setMockStatus({
+          indicator: "none",
+          description: "All Systems Operational",
+          affectedComponents: [],
+        });
+        expect(mockClearAuthOutageSuspension).toHaveBeenCalledTimes(1);
+
+        coordinator.destroy();
+        dispose();
+      });
     });
   });
 });

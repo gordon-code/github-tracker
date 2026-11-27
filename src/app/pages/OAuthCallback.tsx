@@ -1,7 +1,7 @@
 import { createSignal, onMount, Show } from "solid-js";
 import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
-import { setAuth, validateToken, clearAuth } from "../stores/auth";
+import { completeOAuthLogin } from "../stores/auth";
 import { OAUTH_STATE_KEY, OAUTH_RETURN_TO_KEY, sanitizeReturnTo } from "../lib/oauth";
 import LoadingSpinner from "../components/shared/LoadingSpinner";
 
@@ -46,17 +46,14 @@ export default function OAuthCallback() {
 
       const data = (await resp.json()) as TokenResponse;
 
-      if (!resp.ok || data.error || typeof data.access_token !== "string") {
+      if (!resp.ok || data.error || typeof data.access_token !== "string" || !data.access_token.trim()) {
         setError("Failed to complete sign in. Please try again.");
         console.info("[auth] token exchange failed");
         return;
       }
 
-      // Persist token and populate user signal via validateToken
-      setAuth(data);
       console.info("[auth] token exchange succeeded");
-      if (!(await validateToken())) {
-        clearAuth();
+      if (!(await completeOAuthLogin(data.access_token))) {
         setError("Could not verify token. Please try again.");
         return;
       }

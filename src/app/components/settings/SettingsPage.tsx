@@ -15,12 +15,20 @@ import { createCredentialImport } from "../../lib/use-credential-import";
 import { viewState, updateViewState, setTabFilter, applyImportedViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
-import { isValidPatFormat } from "../../lib/pat";
+import { isValidPatFormat, isValidPatExpiryDate, PAT_EXPIRY_INVALID_MESSAGE } from "../../lib/pat";
+import {
+  getPatExpiryStatus,
+  formatPatExpiryBadgeLabel,
+  clearPatExpiryDismissal,
+  checkPatExpiryReminder,
+  type PatExpiryStatus,
+} from "../../lib/pat-expiry";
 import { clearCache } from "../../stores/cache";
 import { pushNotification, dismissNotificationBySource } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
+import { discardResponseBody } from "../../lib/http-errors";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
@@ -43,6 +51,20 @@ import type { IJiraClient } from "../../services/jira-client";
 import JiraFieldPicker from "./JiraFieldPicker";
 import JiraScopePicker from "./JiraScopePicker";
 import type { RepoRef } from "../../services/api";
+
+const PAT_EXPIRY_BADGE_CLASS = {
+  info: "badge-ghost",
+  warning: "badge-warning",
+  error: "badge-error",
+} as const satisfies Record<PatExpiryStatus["severity"], string>;
+
+/**
+ * True while a date input holds an in-progress entry: an incomplete segment (`badInput`, value
+ * reported as "") or a year still being typed digit-by-digit (`0002-`, `0020-`, `0202-`).
+ */
+function isPartialDateEntry(input: HTMLInputElement): boolean {
+  return input.validity.badInput || /^0\d{3}-/.test(input.value);
+}
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
 const VALID_JIRA_SITE_URL_RE = /^https:\/\/[a-z0-9-]+\.atlassian\.net$/i;
@@ -73,6 +95,8 @@ export const SETTINGS_PAGE_SECTION_IDS = [
   "dependencies",
   "data",
 ] as const;
+
+const VALID_SETTINGS_SECTION_IDS = new Set<string>(SETTINGS_PAGE_SECTION_IDS);
 
 // Built-in Jira scope values, duplicated from JiraAssignedTab.tsx's BUILTIN_SCOPE_OPTIONS
 // (not exported there to avoid a cross-component coupling for 3 literal strings).
@@ -106,8 +130,20 @@ export default function SettingsPage() {
   // Replace token panel
   const [showReplaceToken, setShowReplaceToken] = createSignal(false);
   const [replacePatInput, setReplacePatInput] = createSignal("");
+  const [replacePatExpiry, setReplacePatExpiry] = createSignal("");
+  const [replacePatExpiryError, setReplacePatExpiryError] = createSignal<string | null>(null);
   const [replacePatError, setReplacePatError] = createSignal<string | null>(null);
   const [replaceSubmitting, setReplaceSubmitting] = createSignal(false);
+  const patExpiryStatus = createMemo(() => getPatExpiryStatus(config.patExpiresAt ?? null));
+  const [patExpiryError, setPatExpiryError] = createSignal<string | null>(null);
+
+  function resetReplaceForm(): void {
+    replaceAbortCtrl?.abort();
+    setReplacePatInput("");
+    setReplacePatExpiry("");
+    setReplacePatError(null);
+    setReplacePatExpiryError(null);
+  }
   let replaceInputRef: HTMLInputElement | undefined;
   let replaceButtonRef: HTMLButtonElement | undefined;
   let replaceAbortCtrl: AbortController | undefined;
@@ -407,7 +443,12 @@ export default function SettingsPage() {
     }
     // Wholesale replace — parseImportFile returns a fully-parsed Config (every
     // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
-    setConfig(pending.config);
+    // Preserve local authMethod and patExpiresAt since plaintext import does not replace the token.
+    setConfig({
+      ...pending.config,
+      authMethod: config.authMethod,
+      patExpiresAt: config.authMethod === "pat" ? (config.patExpiresAt ?? null) : null,
+    });
     // Identity is already established on this page (Settings is post-auth) —
     // applyImportedViewState is total/no-throw, so this is safe even when the
     // file carries no _viewPreferences section at all.
@@ -469,7 +510,9 @@ export default function SettingsPage() {
     if (replaceSubmitting()) return;
     setReplaceSubmitting(true);
     setReplacePatError(null);
+    setReplacePatExpiryError(null);
     const trimmedToken = replacePatInput().trim();
+    const nextExpiry = replacePatExpiry() || null;
 
     if (trimmedToken === token()) {
       setReplacePatError("This is already your current token");
@@ -484,6 +527,12 @@ export default function SettingsPage() {
       return;
     }
 
+    if (nextExpiry !== null && !isValidPatExpiryDate(nextExpiry)) {
+      setReplacePatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
+      setReplaceSubmitting(false);
+      return;
+    }
+
     replaceAbortCtrl = new AbortController();
     try {
       const resp = await fetch("https://api.github.com/user", {
@@ -494,8 +543,12 @@ export default function SettingsPage() {
         },
         signal: replaceAbortCtrl.signal,
       });
-      if (!showReplaceToken()) return;
+      if (!showReplaceToken()) {
+        discardResponseBody(resp);
+        return;
+      }
       if (!resp.ok) {
+        discardResponseBody(resp);
         setReplacePatError(
           resp.status === 401
             ? "Token is invalid — check that you entered it correctly"
@@ -504,8 +557,13 @@ export default function SettingsPage() {
         return;
       }
       const userData = (await resp.json()) as GitHubUser;
-      setAuthFromPat(trimmedToken, userData);
+      setAuthFromPat(trimmedToken, userData, nextExpiry);
+      resyncLocalEditors();
+      setPatExpiryError(null);
+      clearPatExpiryDismissal();
+      checkPatExpiryReminder("pat", nextExpiry);
       setReplacePatInput("");
+      setReplacePatExpiry("");
       setShowReplaceToken(false);
       replaceButtonRef?.focus();
       pushNotification("pat-replace", "Token replaced successfully", "info");
@@ -549,7 +607,8 @@ export default function SettingsPage() {
   let replaceJiraButtonRef: HTMLButtonElement | undefined;
   let replaceJiraAbortCtrl: AbortController | undefined;
   let replaceJiraHighlightTimer: ReturnType<typeof setTimeout> | undefined;
-  let replaceJiraDeepLinkTimer: ReturnType<typeof setTimeout> | undefined;
+  let deepLinkTimer: ReturnType<typeof setTimeout> | undefined;
+  let deepLinkScrollTimer: ReturnType<typeof setTimeout> | undefined;
 
   function triggerReplaceJiraHighlight() {
     clearTimeout(replaceJiraHighlightTimer);
@@ -584,46 +643,61 @@ export default function SettingsPage() {
     if (restoreFocus) replaceJiraButtonRef?.focus();
   }
 
-  function handleJiraDeepLink() {
-    if (typeof window === "undefined" || window.location.hash !== "#jira") return;
-    const shouldOpenReplace =
-      config.jira?.authMethod === "token" && (isJiraAuthenticated() || config.jira.enabled);
-    if (shouldOpenReplace) {
+  function handleSettingsDeepLink() {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash ?? "";
+    if (typeof hash !== "string" || !hash.startsWith("#")) return;
+    const sectionId = hash.slice(1);
+    if (!VALID_SETTINGS_SECTION_IDS.has(sectionId)) return;
+
+    const shouldOpenReplaceJira =
+      sectionId === "jira" &&
+      config.jira?.authMethod === "token" &&
+      (isJiraAuthenticated() || config.jira.enabled);
+    if (shouldOpenReplaceJira) {
       openReplaceJiraTokenPanel(false, true);
     }
-    setTimeout(() => {
-      document.getElementById("jira")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-      if (shouldOpenReplace) {
+    clearTimeout(deepLinkScrollTimer);
+    deepLinkScrollTimer = setTimeout(() => {
+      deepLinkScrollTimer = undefined;
+      document.getElementById(sectionId)?.scrollIntoView?.({
+        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "instant" : "smooth",
+        block: "start",
+      });
+      if (shouldOpenReplaceJira) {
         replaceJiraTokenInputRef?.focus({ preventScroll: true });
       }
     }, 0);
   }
 
-  function handleJiraDeepLinkClick(e: MouseEvent) {
+  function handleSettingsDeepLinkClick(e: MouseEvent) {
     const target = e.target as Element | null;
-    if (target?.closest?.('a[href="/settings#jira"]')) {
-      clearTimeout(replaceJiraDeepLinkTimer);
-      replaceJiraDeepLinkTimer = setTimeout(handleJiraDeepLink, 0);
+    const anchor = target?.closest?.('a[href^="/settings#"]');
+    const sectionId = anchor?.getAttribute("href")?.slice("/settings#".length);
+    if (sectionId && VALID_SETTINGS_SECTION_IDS.has(sectionId)) {
+      clearTimeout(deepLinkTimer);
+      deepLinkTimer = setTimeout(handleSettingsDeepLink, 0);
     }
   }
 
   onMount(() => {
-    handleJiraDeepLink();
+    handleSettingsDeepLink();
     // @solidjs/router commits window.history.pushState in a .finally() microtask
     // after mounting the route component on SPA link clicks (<a href="/settings#jira">),
     // so re-check on the next macrotask once window.location.hash has settled.
-    replaceJiraDeepLinkTimer = setTimeout(handleJiraDeepLink, 0);
-    window.addEventListener("hashchange", handleJiraDeepLink);
-    document.addEventListener("click", handleJiraDeepLinkClick);
+    deepLinkTimer = setTimeout(handleSettingsDeepLink, 0);
+    window.addEventListener("hashchange", handleSettingsDeepLink);
+    document.addEventListener("click", handleSettingsDeepLinkClick);
   });
 
   onCleanup(() => {
     replaceJiraAbortCtrl?.abort();
     clearTimeout(replaceJiraHighlightTimer);
-    clearTimeout(replaceJiraDeepLinkTimer);
+    clearTimeout(deepLinkTimer);
+    clearTimeout(deepLinkScrollTimer);
     if (typeof window !== "undefined") {
-      window.removeEventListener("hashchange", handleJiraDeepLink);
-      document.removeEventListener("click", handleJiraDeepLinkClick);
+      window.removeEventListener("hashchange", handleSettingsDeepLink);
+      document.removeEventListener("click", handleSettingsDeepLinkClick);
     }
   });
 
@@ -1919,8 +1993,7 @@ export default function SettingsPage() {
                     if (opening) {
                       setTimeout(() => replaceInputRef?.focus(), 0);
                     } else {
-                      replaceAbortCtrl?.abort();
-                      setReplacePatInput(""); setReplacePatError(null);
+                      resetReplaceForm();
                     }
                   }}
                   class="btn btn-xs btn-outline"
@@ -1951,6 +2024,23 @@ export default function SettingsPage() {
                   <Show when={replacePatError()}>
                     <p id="replace-pat-error" role="alert" class="text-error text-xs">{replacePatError()}</p>
                   </Show>
+                  <label for="replace-pat-expiry" class="text-xs text-base-content/70">Expiration date (optional)</label>
+                  <input
+                    id="replace-pat-expiry"
+                    type="date"
+                    max="9999-12-31"
+                    class={`input input-sm input-bordered w-full${replacePatExpiryError() ? " input-error" : ""}`}
+                    aria-invalid={!!replacePatExpiryError()}
+                    aria-describedby={replacePatExpiryError() ? "replace-pat-expiry-error" : undefined}
+                    value={replacePatExpiry()}
+                    onInput={(e) => {
+                      setReplacePatExpiry(e.currentTarget.value);
+                      setReplacePatExpiryError(null);
+                    }}
+                  />
+                  <Show when={replacePatExpiryError()}>
+                    <p id="replace-pat-expiry-error" role="alert" class="text-error text-xs">{replacePatExpiryError()}</p>
+                  </Show>
                   <div class="flex gap-2">
                     <button
                       type="submit"
@@ -1962,7 +2052,7 @@ export default function SettingsPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { replaceAbortCtrl?.abort(); setShowReplaceToken(false); setReplacePatInput(""); setReplacePatError(null); replaceButtonRef?.focus(); }}
+                      onClick={() => { resetReplaceForm(); setShowReplaceToken(false); replaceButtonRef?.focus(); }}
                       class="btn btn-sm btn-ghost"
                     >
                       Cancel
@@ -1971,6 +2061,74 @@ export default function SettingsPage() {
                 </div>
               </form>
             </div>
+          </Show>
+
+          <Show when={config.authMethod === "pat"}>
+            <SettingRow
+              label="Token expiration reminder"
+              description="Optional date to warn you before your PAT expires (stored locally only)"
+            >
+              <div class="flex items-center gap-2 flex-wrap">
+                <Show
+                  when={patExpiryStatus()}
+                  fallback={<span class="text-xs text-base-content/50">Not set</span>}
+                >
+                  {(status) => (
+                    <span class={`badge badge-sm ${PAT_EXPIRY_BADGE_CLASS[status().severity]}`}>
+                      {formatPatExpiryBadgeLabel(status())}
+                    </span>
+                  )}
+                </Show>
+                <input
+                  type="date"
+                  max="9999-12-31"
+                  aria-label="PAT expiration date"
+                  aria-invalid={patExpiryError() !== null}
+                  aria-describedby={patExpiryError() !== null ? "pat-expiry-error" : undefined}
+                  class={`input input-xs input-bordered${patExpiryError() !== null ? " input-error" : ""}`}
+                  value={config.patExpiresAt ?? ""}
+                  onChange={(e) => {
+                    const raw = e.currentTarget.value;
+                    // Chromium fires change per segment while typing; skip partial entries until blur.
+                    if (isPartialDateEntry(e.currentTarget)) return;
+                    if (raw && !isValidPatExpiryDate(raw)) {
+                      e.currentTarget.value = config.patExpiresAt ?? "";
+                      setPatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
+                      return;
+                    }
+                    setPatExpiryError(null);
+                    const val = raw || null;
+                    saveWithFeedback({ patExpiresAt: val });
+                    clearPatExpiryDismissal();
+                    checkPatExpiryReminder(config.authMethod, val);
+                  }}
+                  onBlur={(e) => {
+                    if (!isPartialDateEntry(e.currentTarget)) return;
+                    e.currentTarget.value = config.patExpiresAt ?? "";
+                    setPatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
+                  }}
+                />
+                <Show when={Boolean(config.patExpiresAt)}>
+                  <button
+                    type="button"
+                    aria-label="Clear PAT expiration date"
+                    class="btn btn-xs btn-ghost"
+                    onClick={() => {
+                      setPatExpiryError(null);
+                      saveWithFeedback({ patExpiresAt: null });
+                      clearPatExpiryDismissal();
+                    }}
+                  >
+                    Clear
+                  </button>
+                </Show>
+                <Show when={patExpiryError() !== null}>
+                  <p id="pat-expiry-error" role="alert" class="text-error text-xs w-full">
+                    {patExpiryError()}
+                  </p>
+                </Show>
+              </div>
+            </SettingRow>
           </Show>
 
           {/* Clear cache */}

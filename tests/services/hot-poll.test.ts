@@ -54,8 +54,10 @@ vi.mock("../../src/app/lib/errors", () => ({
   clearNotifications: vi.fn(),
   resetNotificationState: vi.fn(),
   addMutedSource: vi.fn(),
+  removeMutedSource: vi.fn(),
   isMuted: vi.fn(() => false),
   clearMutedSources: vi.fn(),
+  onNotificationDismissed: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("../../src/app/lib/notifications", () => ({
@@ -86,6 +88,13 @@ vi.mock("../../src/app/stores/auth", () => ({
   onAuthCleared: vi.fn(),
   expireToken: vi.fn(),
   identityEpoch: () => mockIdentityEpoch(),
+}));
+
+const mockIsGitHubApiOutage = vi.fn().mockReturnValue(false);
+vi.mock("../../src/app/services/github-status", () => ({
+  fetchGitHubStatus: vi.fn().mockResolvedValue(undefined),
+  isGitHubApiOutage: () => mockIsGitHubApiOutage(),
+  getGitHubStatus: vi.fn().mockReturnValue(null),
 }));
 
 // Import AFTER mocks are set up
@@ -1231,10 +1240,13 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
-  it("redirects to /login via expireToken on 401 instead of generic backoff", async () => {
+  it("exits silently on confirmed 401 (epoch bumped) without calling expireToken, rescheduling, or emitting hot-poll-auth-expired to Sentry", async () => {
     const onHotData = vi.fn();
-    const octokit = makeOctokit(undefined, () =>
-      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 })));
+    const octokit = makeOctokit(undefined, () => {
+      // Simulate handleRuntimeUnauthorized bumping identityEpoch() on confirmed 3x 401
+      mockIdentityEpoch.mockImplementation(() => 1);
+      return Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 }));
+    });
     mockGetClient.mockReturnValue(octokit);
 
     rebuildHotSets({
@@ -1244,20 +1256,32 @@ describe("createHotPollCoordinator", () => {
 
     const { expireToken } = await import("../../src/app/stores/auth");
     const { pushError } = await import("../../src/app/lib/errors");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (expireToken as ReturnType<typeof vi.fn>).mockClear();
     (pushError as ReturnType<typeof vi.fn>).mockClear();
+    vi.mocked(Sentry.captureException).mockClear();
     mockLocationReplace.mockClear();
+    const graphqlFn = octokit.graphql as ReturnType<typeof vi.fn>;
 
-    await createRoot(async (dispose) => {
-      createHotPollCoordinator(() => 10, onHotData);
-      await vi.advanceTimersByTimeAsync(10_000);
+    try {
+      await createRoot(async (dispose) => {
+        createHotPollCoordinator(() => 10, onHotData);
+        await vi.advanceTimersByTimeAsync(10_000);
 
-      expect(expireToken).toHaveBeenCalledOnce();
-      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
-      // Not treated as a generic retryable failure
-      expect(pushError).not.toHaveBeenCalledWith("hot-poll", expect.any(String), true);
-      dispose();
-    });
+        expect(graphqlFn).toHaveBeenCalledTimes(1);
+        expect(expireToken).not.toHaveBeenCalled();
+        expect(mockLocationReplace).not.toHaveBeenCalled();
+        expect(pushError).not.toHaveBeenCalledWith("hot-poll", expect.any(String), true);
+        expect(Sentry.captureException).not.toHaveBeenCalled();
+
+        // Advance well past several would-be cycles — no further fetch attempts
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(graphqlFn).toHaveBeenCalledTimes(1);
+        dispose();
+      });
+    } finally {
+      mockIdentityEpoch.mockImplementation(() => 0);
+    }
   });
 
   it("ignores a 401 from a cycle started under a previous identity epoch instead of expiring the current token", async () => {
@@ -1276,8 +1300,10 @@ describe("createHotPollCoordinator", () => {
 
     const { expireToken } = await import("../../src/app/stores/auth");
     const { pushError } = await import("../../src/app/lib/errors");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (expireToken as ReturnType<typeof vi.fn>).mockClear();
     (pushError as ReturnType<typeof vi.fn>).mockClear();
+    vi.mocked(Sentry.captureException).mockClear();
     mockLocationReplace.mockClear();
 
     try {
@@ -1294,6 +1320,7 @@ describe("createHotPollCoordinator", () => {
         expect(expireToken).not.toHaveBeenCalled();
         expect(mockLocationReplace).not.toHaveBeenCalled();
         expect(pushError).not.toHaveBeenCalledWith("hot-poll", expect.any(String), true);
+        expect(Sentry.captureException).not.toHaveBeenCalled();
         expect(onHotData).not.toHaveBeenCalled();
         dispose();
       });
@@ -1302,7 +1329,7 @@ describe("createHotPollCoordinator", () => {
     }
   });
 
-  it("does not schedule another cycle after a 401 redirect", async () => {
+  it("preserved same-epoch 401 skips Sentry, suppresses toast & backoff inflation during outage, and pushes sanitized transient copy outside outage", async () => {
     const onHotData = vi.fn();
     const octokit = makeOctokit(undefined, () =>
       Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 })));
@@ -1313,18 +1340,54 @@ describe("createHotPollCoordinator", () => {
       pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
+    const { pushError } = await import("../../src/app/lib/errors");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     const graphqlFn = octokit.graphql as ReturnType<typeof vi.fn>;
 
-    await createRoot(async (dispose) => {
-      createHotPollCoordinator(() => 10, onHotData);
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(graphqlFn).toHaveBeenCalledTimes(1);
+    // 1. Outage activates mid-flight while 401 is thrown: suppresses toast & backoff inflation, still reschedules at base interval
+    mockIsGitHubApiOutage.mockReturnValueOnce(false).mockReturnValue(true);
+    (pushError as ReturnType<typeof vi.fn>).mockClear();
+    vi.mocked(Sentry.captureException).mockClear();
 
-      // Advance well past several would-be cycles — no further fetch attempts
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(graphqlFn).toHaveBeenCalledTimes(1);
-      dispose();
-    });
+    try {
+      await createRoot(async (dispose) => {
+        createHotPollCoordinator(() => 10, onHotData);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(graphqlFn).toHaveBeenCalledTimes(1);
+        expect(pushError).not.toHaveBeenCalled();
+        expect(Sentry.captureException).not.toHaveBeenCalled();
+
+        // Subsequent ticks while outage persists pause before calling graphqlFn, at constant 10s interval
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(graphqlFn).toHaveBeenCalledTimes(1);
+        // Flip outage off to verify consecutiveFailures was not inflated (resumes on next 10s tick, not 20s)
+        mockIsGitHubApiOutage.mockReturnValue(false);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(graphqlFn).toHaveBeenCalledTimes(2);
+        dispose();
+      });
+
+      // 2. Outside outage: pushes sanitized transient message, skips Sentry, and reschedules
+      mockIsGitHubApiOutage.mockReturnValue(false);
+      graphqlFn.mockClear();
+      (pushError as ReturnType<typeof vi.fn>).mockClear();
+      vi.mocked(Sentry.captureException).mockClear();
+
+      await createRoot(async (dispose) => {
+        createHotPollCoordinator(() => 10, onHotData);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(graphqlFn).toHaveBeenCalledTimes(1);
+        expect(Sentry.captureException).not.toHaveBeenCalled();
+        expect(pushError).toHaveBeenCalledWith(
+          "hot-poll",
+          "GitHub authentication check failed temporarily — retrying",
+          true
+        );
+        dispose();
+      });
+    } finally {
+      mockIsGitHubApiOutage.mockReturnValue(false);
+    }
   });
 
   it("does not schedule when interval is 0", async () => {
@@ -1342,6 +1405,55 @@ describe("createHotPollCoordinator", () => {
       expect(onHotData).not.toHaveBeenCalled();
       dispose();
     });
+  });
+
+  it("pauses during API outage across 3+ ticks at constant base interval and resumes when outage clears", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [{
+        databaseId: 1,
+        state: "OPEN",
+        mergeStateStatus: "CLEAN",
+        reviewDecision: null,
+        statusCheckRollup: { state: "SUCCESS" },
+      }],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
+    });
+
+    const graphqlFn = octokit.graphql as ReturnType<typeof vi.fn>;
+    mockIsGitHubApiOutage.mockReturnValue(true);
+
+    try {
+      await createRoot(async (dispose) => {
+        createHotPollCoordinator(() => 10, onHotData, { onStart });
+
+        // 3+ ticks while outage is active: 0 fetches, 0 onStart/onHotData
+        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(graphqlFn).not.toHaveBeenCalled();
+        expect(onStart).not.toHaveBeenCalled();
+        expect(onHotData).not.toHaveBeenCalled();
+
+        // Outage clears -> next 10s tick immediately resumes (no backoff)
+        mockIsGitHubApiOutage.mockReturnValue(false);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(graphqlFn).toHaveBeenCalledTimes(1);
+        expect(onStart).toHaveBeenCalledTimes(1);
+        expect(onHotData).toHaveBeenCalledTimes(1);
+
+        dispose();
+      });
+    } finally {
+      mockIsGitHubApiOutage.mockReturnValue(false);
+    }
   });
 });
 

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../../src/app/stores/auth", () => ({
   onAuthCleared: vi.fn(),
   user: vi.fn(() => null),
+  identityEpoch: vi.fn(() => 0),
 }));
 
 // Mock github module (not directly used by events.ts, but imported transitively)
@@ -13,6 +14,7 @@ vi.mock("../../src/app/services/github", () => ({
 
 // Import AFTER mocks
 import { fetchUserEvents, parseRepoEvents, resetEventsState } from "../../src/app/services/events";
+import { identityEpoch } from "../../src/app/stores/auth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -321,6 +323,34 @@ describe("fetchUserEvents — pagination", () => {
     warnSpy.mockRestore();
   });
 
+  it("rethrows 401 on page 1 instead of swallowing", async () => {
+    const octokit = makeOctokit(() =>
+      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 }))
+    );
+
+    await expect(fetchUserEvents(octokit as never, "someuser")).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("rethrows 401 on pagination (page 2) instead of returning partial page 1", async () => {
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(1000 + i) })
+    );
+
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request
+      .mockImplementationOnce(() => Promise.resolve({ data: page1Events, headers: {} }))
+      .mockImplementationOnce(() =>
+        Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 }))
+      );
+
+    await expect(fetchUserEvents(octokit as never, "someuser")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(octokit.request).toHaveBeenCalledTimes(2);
+  });
+
   it("stops pagination when subsequent page returns zero events", async () => {
     const page1Events = Array.from({ length: 100 }, (_, i) =>
       makeEvent({ id: String(1000 + i) })
@@ -503,5 +533,32 @@ describe("resetEventsState", () => {
     // All events returned — no ID filtering since _lastEventId was cleared
     expect(result.events).toHaveLength(2);
     expect(result.changed).toBe(true);
+  });
+
+  it("STRUCT-006: discards result and does not update _lastEventId when identityEpoch advances mid-flight", async () => {
+    vi.mocked(identityEpoch).mockReturnValue(0);
+
+    // 1. Seed _lastEventId = "100"
+    const seedOctokit = makeOctokit(() =>
+      Promise.resolve({ data: [makeEvent({ id: "100" })], headers: {} })
+    );
+    await fetchUserEvents(seedOctokit as never, "usera");
+
+    // 2. Advance identityEpoch mid-flight while fetching event id "500"
+    const staleOctokit = makeOctokit(async () => {
+      vi.mocked(identityEpoch).mockReturnValue(1);
+      return { data: [makeEvent({ id: "500" })], headers: {} };
+    });
+    const staleResult = await fetchUserEvents(staleOctokit as never, "usera");
+    expect(staleResult).toEqual({ events: [], changed: false });
+
+    // 3. Next fetch at epoch 1: event id "200" (> "100", < "500") is still returned,
+    // proving _lastEventId was NOT updated to "500" by the stale response.
+    const nextOctokit = makeOctokit(() =>
+      Promise.resolve({ data: [makeEvent({ id: "200" })], headers: {} })
+    );
+    const nextResult = await fetchUserEvents(nextOctokit as never, "usera");
+    expect(nextResult.changed).toBe(true);
+    expect(nextResult.events.map((e) => e.id)).toEqual(["200"]);
   });
 });

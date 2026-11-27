@@ -74,6 +74,8 @@ OAuth is the recommended sign-in method. Click **Sign in with GitHub** on the lo
 
 OAuth tokens work across all organizations you belong to.
 
+If an OAuth callback fails due to a transient error, your existing settings and Jira connection are preserved rather than wiped. Similarly, transient GitHub `401` responses do not immediately log you out — the app verifies against GitHub 3 times before expiring your session, and if a GitHub token expires, your configuration, view preferences, and Jira connection are preserved for when you sign back in (token expiry alone never clears Jira credentials; they are cleared by explicit **Sign out**, **Reset all**, signing in as a different GitHub account or when the app cannot tell which GitHub account the saved Jira connection belongs to, importing settings or credentials that don't match the saved Jira site, or Jira itself rejecting the connection).
+
 ### Personal Access Token Sign-In
 
 If you prefer not to use OAuth, you can sign in with a GitHub Personal Access Token (PAT). Click **Use a Personal Access Token** on the login page and paste your token.
@@ -85,7 +87,9 @@ Two token formats are accepted:
 
 The token is validated against the GitHub API before being stored. It is saved permanently in your browser's `localStorage` — you will not need to re-enter it on revisit.
 
-To replace your token later (e.g., after expiration or rotation), go to **Settings > Data > Authentication** and click **Replace**. The new token is validated before it replaces the old one. Other open tabs update automatically.
+Because GitHub does not expose the `GitHub-Authentication-Token-Expiration` header to browsers via CORS (and GitHub Tracker keeps PATs strictly client-side), you can optionally enter an **Expiration date (optional)** when signing in (or later via **Settings > Data > Token expiration reminder** or the **Replace** token panel). Incomplete or invalid dates are not saved. This date is stored locally only and triggers escalating Notification Drawer and toast reminders (**Update PAT in Settings**) at 7 days, 3 days, 1 day/today, and after expiration, alongside an inline countdown badge in Settings.
+
+To replace your token later (e.g., after expiration or rotation), go to **Settings > Data > Authentication** and click **Replace**. You can also set or update the **Expiration date (optional)** there. The new token is validated before it replaces the old one. Other open tabs update automatically.
 
 ### Repository Selection
 
@@ -163,7 +167,7 @@ The scope filter is hidden (and always set to "Involves me") when you have no tr
 
 A small status dot appears in the header, next to your avatar. It reflects GitHub's own reported status for the services this dashboard depends on — Actions, API Requests, Git Operations, Issues, and Pull Requests. Green means all tracked services are operational; yellow, orange, or red indicate minor, major, or critical disruption respectively.
 
-Click the badge to see details on any active incident, including affected components and the latest status update, plus a link to [githubstatus.com](https://www.githubstatus.com). Other GitHub services (Copilot, Codespaces, Pages, Packages, etc.) are not tracked by this badge.
+Click the badge to see details on any active incident, including affected components and the latest status update, plus a link to [githubstatus.com](https://www.githubstatus.com). When **API Requests** reports a partial or major outage, the popover also notes that background syncs are paused automatically until GitHub recovers. Other GitHub services (Copilot, Codespaces, Pages, Packages, etc.) are not tracked by this badge.
 
 ---
 
@@ -421,6 +425,10 @@ A ±30 second jitter is applied to the refresh interval to avoid synchronized AP
 
 Each full refresh also checks GitHub's own status page for outages affecting Actions, API Requests, Git Operations, Issues, or Pull Requests. This is a single lightweight, unauthenticated request and does not count against your GitHub API rate limit. It follows the same schedule as the full refresh — including the same visibility-based pausing — rather than running on its own timer.
 
+When `githubstatus.com` reports a partial or major outage on **API Requests**, background syncs (full poll, hot poll, and events poll) pause automatically while status checks continue so syncing resumes as soon as GitHub recovers (even when automatic refresh is set to **Off**). Clicking the manual **Refresh** button bypasses the pause.
+
+During an active **API Requests** outage, `401` session expiration is also suspended for up to 30 minutes while you are on the dashboard — a notification with a **Sign in again** link lets you re-authenticate manually if your token was actually revoked. If you open or reload the app during an API outage and startup verification hits repeated `401` responses, the app routes to the login page while keeping your saved token in browser storage so reloading after GitHub recovers restores your session automatically (or you can sign in again immediately if your token was revoked).
+
 ### Hot Poll
 
 A second, faster poll loop runs alongside the full refresh specifically for in-flight items. It targets:
@@ -467,6 +475,10 @@ Transient single-cycle PR enrichment blips are absorbed silently when cached PR 
 ### GitHub Outage Notifications
 
 When a GitHub outage affecting a tracked service starts, a toast appears and an entry is added to the notification drawer. A second notification confirms it once the outage resolves. These always appear via the in-app toast and drawer — they are not part of the **Browser Push Notifications** toggles below and cannot be disabled.
+
+If `401` responses occur during an active **API Requests** outage, session expiration is suspended for up to 30 minutes and a warning notification with a **Sign in again** link is shown in case your token was revoked.
+
+For Personal Access Token users who have configured a **Token expiration reminder**, escalating notifications with an **Update PAT in Settings** link appear at 7 days, 3 days, 1 day/today, and after expiration. Dismissing a reminder suppresses that tier while still escalating when the next threshold is reached.
 
 ### Browser Push Notifications
 
@@ -734,6 +746,7 @@ Settings are saved automatically to `localStorage` and persist across sessions. 
 | API Usage | — | Displays per-source API call counts, pool labels (Core/GraphQL), and last-called timestamps for the current rate limit window. Counts auto-reset when the rate limit window expires. Use "Reset counts" to clear manually. |
 | MCP relay enabled | Off | Allow a local MCP server to receive live dashboard data over WebSocket. |
 | MCP relay port | 9876 | Port for the WebSocket relay connection. Must match the MCP server's `MCP_WS_PORT`. |
+| Token expiration reminder | Not set | (PAT sign-in only) Optional local-only expiration date for your PAT that shows an inline status badge and triggers escalating reminders (**Update PAT in Settings**) at 7 days, 3 days, 1 day/today, and expired. |
 
 ### View State Settings
 
@@ -762,7 +775,7 @@ Go to **Settings > Data > Export** and click **Export**. A dialog opens with two
 - **Export config only** — downloads `github-tracker-settings.json` immediately: your full configuration (repositories, organizations, tracked users, tabs, refresh interval, notification preferences, Jira display settings, and everything else on the Settings page) plus your view preferences (below), with no credentials.
 - **Export with encrypted credentials** — see [Including Encrypted Credentials](#including-encrypted-credentials).
 
-A plaintext export (config only) contains **no credentials**. Your Atlassian email is also omitted (it is personally identifiable and not needed to restore the configuration). Importing a plaintext export restores your settings but does not sign you in — you still authenticate normally.
+A plaintext export (config only) contains **no credentials**. Your Atlassian email and local PAT expiration reminder (`patExpiresAt`) are also omitted (the email is personally identifiable, and `patExpiresAt` is tied to your local token). Importing a plaintext export restores your settings but does not sign you in — you still authenticate normally, and your local machine's authentication method and PAT expiration date are preserved.
 
 ### View Preferences Are Included Too
 
@@ -784,7 +797,7 @@ A few things are deliberately left out:
 
 ### Including Encrypted Credentials
 
-To migrate a full session (or set up an incognito test session) without re-authenticating, choose **Export with encrypted credentials** in the export dialog. Right above that choice, the dialog shows a warning: *"This is a one-time transfer, not a durable backup — the encrypted credentials can be imported once and expire in 30 days."* The export then also bundles your GitHub token and — if connected — your Jira credentials, encrypted so they can travel in the file safely.
+To migrate a full session (or set up an incognito test session) without re-authenticating, choose **Export with encrypted credentials** in the export dialog. Right above that choice, the dialog shows a warning: *"This is a one-time transfer, not a durable backup — the encrypted credentials can be imported once and expire in 30 days."* The export then also bundles your GitHub token (along with your PAT expiration reminder date when migrating a PAT session) and — if connected — your Jira credentials, encrypted so they can travel in the file safely.
 
 When you export with credentials:
 
@@ -886,5 +899,5 @@ Go to **Settings > Repositories > Manage Repositories**, find the repo, and dese
 
 **How do I sign out or reset everything?**
 
-- **Sign out**: Settings > Data > Sign out. This clears your auth token and returns you to the login page. Your config is preserved.
+- **Sign out**: Settings > Data > Sign out. This clears your GitHub token, Jira credentials, and cached data, resets your local config and view preferences, and returns you to the login page (whereas automatic token expiry preserves your config, view preferences, and Jira connection for same-user re-authentication).
 - **Reset all**: Settings > Data > Reset all. This clears all settings, cache, auth tokens, API usage data, and reloads the page. All configuration is lost.

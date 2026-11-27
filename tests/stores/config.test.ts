@@ -62,6 +62,7 @@ describe("ConfigSchema", () => {
     expect(result.rememberLastTab).toBe(true);
     expect(result.onboardingComplete).toBe(false);
     expect(result.authMethod).toBe("oauth");
+    expect(result.patExpiresAt).toBeNull();
     expect(result.enableActions).toBe(true);
     expect(result.dependencies.excludedOrgs).toEqual([]);
     expect(result.dependencies.excludedRepos).toEqual([]);
@@ -152,6 +153,25 @@ describe("ConfigSchema", () => {
       const stored = ConfigSchema.parse({ hotPollInterval: 45 });
       const roundTripped = ConfigSchema.parse(JSON.parse(JSON.stringify(stored)));
       expect(roundTripped.hotPollInterval).toBe(45);
+    });
+  });
+
+  describe("patExpiresAt", () => {
+    it("defaults to null", () => {
+      expect(ConfigSchema.parse({}).patExpiresAt).toBeNull();
+    });
+
+    it("accepts valid ISO dates including leap day 2028-02-29 and null", () => {
+      expect(ConfigSchema.safeParse({ patExpiresAt: "2027-06-01" }).success).toBe(true);
+      expect(ConfigSchema.safeParse({ patExpiresAt: "2028-02-29" }).success).toBe(true);
+      expect(ConfigSchema.safeParse({ patExpiresAt: null }).success).toBe(true);
+    });
+
+    it("rejects invalid formats and non-existent calendar dates", () => {
+      expect(ConfigSchema.safeParse({ patExpiresAt: "2026-02-29" }).success).toBe(false);
+      expect(ConfigSchema.safeParse({ patExpiresAt: "2026-04-31" }).success).toBe(false);
+      expect(ConfigSchema.safeParse({ patExpiresAt: "2026/11/25" }).success).toBe(false);
+      expect(ConfigSchema.safeParse({ patExpiresAt: "" }).success).toBe(false);
     });
   });
 });
@@ -371,6 +391,21 @@ describe("preParseConfigFixups", () => {
     expect(cfg.trackedUsers).toHaveLength(1);
     expect(cfg.trackedUsers[0].login).toBe("renovate[bot]");
   });
+
+  it("salvages corrupted patExpiresAt to null without wiping other config fields", () => {
+    const raw = preParseConfigFixups({ patExpiresAt: "2026-02-29", refreshInterval: 120 }) as Record<string, unknown>;
+    expect(raw.patExpiresAt).toBeNull();
+    expect(raw.refreshInterval).toBe(120);
+
+    localStorageMock.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ patExpiresAt: "not-a-date", refreshInterval: 120, theme: "dark" })
+    );
+    const cfg = loadConfig();
+    expect(cfg.patExpiresAt).toBeNull();
+    expect(cfg.refreshInterval).toBe(120);
+    expect(cfg.theme).toBe("dark");
+  });
 });
 
 describe("postParseConfigFixups", () => {
@@ -541,6 +576,7 @@ describe("updateConfig (real export)", () => {
     ["rememberLastTab", { rememberLastTab: false }],
     ["onboardingComplete", { onboardingComplete: true }],
     ["authMethod", { authMethod: "pat" as const }],
+    ["patExpiresAt", { patExpiresAt: "2027-06-01" }],
   ])("updating only %s preserves all other fields", (fieldName, patch) => {
     createRoot((dispose) => {
       // Seed config with non-default values for every field
@@ -561,6 +597,7 @@ describe("updateConfig (real export)", () => {
         rememberLastTab: false,
         onboardingComplete: true,
         authMethod: "pat" as const,
+        patExpiresAt: "2026-12-31",
       };
       updateConfig(seed);
 

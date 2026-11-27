@@ -47,6 +47,12 @@ export function preParseConfigFixups(raw: unknown): unknown {
       (raw as Record<string, unknown>).theme = "auto";
     }
   }
+  if (raw && typeof raw === "object" && "patExpiresAt" in raw) {
+    const rawExpiry = (raw as Record<string, unknown>).patExpiresAt;
+    if (rawExpiry !== null && !z.iso.date().safeParse(rawExpiry).success) {
+      (raw as Record<string, unknown>).patExpiresAt = null;
+    }
+  }
   // Migrate tracked user logins: strip [bot] suffix from stored logins.
   // handleTrackBot now stores base names only, but pre-migration data may
   // have "renovate[bot]" which causes a doubled "renovate[bot][bot]" variant.

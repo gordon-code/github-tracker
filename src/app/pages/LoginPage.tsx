@@ -1,15 +1,25 @@
-import { createSignal, Show, Switch, Match } from "solid-js";
+import { createSignal, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
-import { setAuthFromPat, type GitHubUser } from "../stores/auth";
+import {
+  setAuthFromPat,
+  token,
+  isAuthenticated,
+  validateToken,
+  hasBootValidateAttempted,
+  type GitHubUser,
+} from "../stores/auth";
 import { config } from "../stores/config";
 import type { Config } from "../../shared/schemas";
 import {
   isValidPatFormat,
+  isValidPatExpiryDate,
+  PAT_EXPIRY_INVALID_MESSAGE,
   GITHUB_PAT_URL,
   GITHUB_FINE_GRAINED_PAT_URL,
 } from "../lib/pat";
 import { buildAuthorizeUrl } from "../lib/oauth";
+import { discardResponseBody } from "../lib/http-errors";
 import type { CredentialBundle } from "../lib/settings-transfer";
 import { createCredentialImport } from "../lib/use-credential-import";
 
@@ -18,7 +28,9 @@ export default function LoginPage() {
 
   const [showPatForm, setShowPatForm] = createSignal(false);
   const [patInput, setPatInput] = createSignal("");
+  const [patExpiryInput, setPatExpiryInput] = createSignal("");
   const [patError, setPatError] = createSignal<string | null>(null);
+  const [patExpiryError, setPatExpiryError] = createSignal<string | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
 
   // ── Import from backup (pre-auth) ─────────────────────────────────────────
@@ -32,6 +44,22 @@ export default function LoginPage() {
   const [importCommitting, setImportCommitting] = createSignal(false);
   let importInputRef: HTMLInputElement | undefined;
 
+  let disposed = false;
+  onCleanup(() => {
+    disposed = true;
+  });
+
+  onMount(() => {
+    if (token() !== null && !isAuthenticated() && !hasBootValidateAttempted()) {
+      void (async () => {
+        const ok = await validateToken();
+        if (ok && !disposed && !showPatForm() && !showImport()) {
+          navigate(config.onboardingComplete ? "/dashboard" : "/onboarding", { replace: true });
+        }
+      })();
+    }
+  });
+
   function handleLogin() {
     window.location.href = buildAuthorizeUrl();
   }
@@ -44,8 +72,15 @@ export default function LoginPage() {
       setPatError(validation.error);
       return;
     }
+    const nextExpiry = patExpiryInput() || null;
+    if (nextExpiry !== null && !isValidPatExpiryDate(nextExpiry)) {
+      setPatError(null);
+      setPatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
+      return;
+    }
     setSubmitting(true);
     setPatError(null);
+    setPatExpiryError(null);
     const trimmedToken = patInput().trim();
     try {
       const resp = await fetch("https://api.github.com/user", {
@@ -56,6 +91,7 @@ export default function LoginPage() {
         },
       });
       if (!resp.ok) {
+        discardResponseBody(resp);
         setPatError(
           resp.status === 401
             ? "Token is invalid — check that you entered it correctly"
@@ -65,8 +101,9 @@ export default function LoginPage() {
       }
       if (!showPatForm()) return;
       const userData = (await resp.json()) as GitHubUser;
-      setAuthFromPat(trimmedToken, userData);
+      setAuthFromPat(trimmedToken, userData, nextExpiry);
       setPatInput("");
+      setPatExpiryInput("");
       navigate("/", { replace: true });
     } catch (err) {
       captureException(err, { tags: { source: "pat-validation" } });
@@ -141,7 +178,9 @@ export default function LoginPage() {
   function openImport() {
     setShowPatForm(false);
     setPatError(null);
+    setPatExpiryError(null);
     setPatInput("");
+    setPatExpiryInput("");
     setImportError(null);
     credentialImport.reset();
     setShowImport(true);
@@ -248,6 +287,33 @@ export default function LoginPage() {
                   </Show>
                 </div>
 
+                <div class="text-left w-full">
+                  <label for="pat-expiry-input" class="label">
+                    <span class="label-text">Expiration date (optional)</span>
+                  </label>
+                  <input
+                    id="pat-expiry-input"
+                    type="date"
+                    max="9999-12-31"
+                    class={`input input-bordered w-full${patExpiryError() !== null ? " input-error" : ""}`}
+                    aria-invalid={patExpiryError() !== null}
+                    aria-describedby={patExpiryError() !== null ? "pat-expiry-error pat-expiry-help" : "pat-expiry-help"}
+                    value={patExpiryInput()}
+                    onInput={(e) => {
+                      setPatExpiryInput(e.currentTarget.value);
+                      setPatExpiryError(null);
+                    }}
+                  />
+                  <Show when={patExpiryError() !== null}>
+                    <p id="pat-expiry-error" role="alert" class="text-error text-xs mt-1">
+                      {patExpiryError()}
+                    </p>
+                  </Show>
+                  <p id="pat-expiry-help" class="text-xs text-base-content/60 mt-1">
+                    Stored locally to remind you before your token expires.
+                  </p>
+                </div>
+
                 <button
                   type="submit"
                   class="btn btn-neutral w-full"
@@ -290,7 +356,7 @@ export default function LoginPage() {
 
                 <button
                   type="button"
-                  onClick={() => { setShowPatForm(false); setPatError(null); setPatInput(""); }}
+                  onClick={() => { setShowPatForm(false); setPatError(null); setPatExpiryError(null); setPatInput(""); setPatExpiryInput(""); }}
                   class="link link-primary text-sm mt-2"
                 >
                   Use OAuth instead

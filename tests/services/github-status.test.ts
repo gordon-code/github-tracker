@@ -13,6 +13,7 @@ vi.mock("../../src/app/lib/errors", () => ({
 import {
   fetchGitHubStatus,
   getGitHubStatus,
+  isGitHubApiOutage,
   resetGitHubStatusState,
   TRACKED_COMPONENT_NAMES,
 } from "../../src/app/services/github-status";
@@ -258,7 +259,7 @@ describe("fetchGitHubStatus", () => {
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("is a no-op when called again while a prior call's fetch is still in flight", async () => {
+  it("coalesces concurrent calls into a single in-flight fetch whose returned promise resolves after state updates", async () => {
     let resolveFetch!: (value: Response) => void;
     const pending = new Promise<Response>((resolve) => {
       resolveFetch = resolve;
@@ -269,10 +270,21 @@ describe("fetchGitHubStatus", () => {
     const first = fetchGitHubStatus();
     const second = fetchGitHubStatus();
 
+    expect(first).toBe(second);
+    await vi.waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+    expect(getGitHubStatus()).toBeNull();
+
     resolveFetch(jsonResponse(makeSummary()));
-    await Promise.all([first, second]);
+    const [firstStatus, secondStatus] = await Promise.all([
+      first.then(() => getGitHubStatus()),
+      second.then(() => getGitHubStatus()),
+    ]);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(firstStatus).not.toBeNull();
+    expect(secondStatus).toBe(firstStatus);
   });
 
   it("304 cache-hit path on cold start (_githubStatus() === null): reflects parseSummary run against the cached JSON, not empty/null", async () => {
@@ -489,13 +501,161 @@ describe("fetchGitHubStatus", () => {
     expect(mockDismissNotificationBySource).toHaveBeenCalledWith("github-status");
   });
 
-  it("resetGitHubStatusState clears the current status back to null", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary())));
+  it("resetGitHubStatusState clears the current status back to null and isGitHubApiOutage to false", async () => {
+    const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+      makeComponent(n, n === "API Requests" ? "major_outage" : "operational")
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components }))));
     await fetchGitHubStatus();
     expect(getGitHubStatus()).not.toBeNull();
+    expect(isGitHubApiOutage()).toBe(true);
 
     resetGitHubStatusState();
 
     expect(getGitHubStatus()).toBeNull();
+    expect(isGitHubApiOutage()).toBe(false);
+  });
+
+  describe("apiSeverity and isGitHubApiOutage", () => {
+    it("returns true when API Requests is major_outage (critical) or partial_outage (major)", async () => {
+      const majorOutageComponents = [...TRACKED_COMPONENT_NAMES].map((n) =>
+        makeComponent(n, n === "API Requests" ? "major_outage" : "operational")
+      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components: majorOutageComponents }))));
+      await fetchGitHubStatus();
+      expect(getGitHubStatus()!.apiSeverity).toBe("critical");
+      expect(isGitHubApiOutage()).toBe(true);
+
+      const partialOutageComponents = [...TRACKED_COMPONENT_NAMES].map((n) =>
+        makeComponent(n, n === "API Requests" ? "partial_outage" : "operational")
+      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components: partialOutageComponents }))));
+      await fetchGitHubStatus();
+      expect(getGitHubStatus()!.apiSeverity).toBe("major");
+      expect(isGitHubApiOutage()).toBe(true);
+    });
+
+    it("returns false for API Requests degraded_performance (minor)", async () => {
+      const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+        makeComponent(n, n === "API Requests" ? "degraded_performance" : "operational")
+      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components }))));
+
+      await fetchGitHubStatus();
+
+      expect(getGitHubStatus()!.apiSeverity).toBe("minor");
+      expect(isGitHubApiOutage()).toBe(false);
+    });
+
+    it("returns false for operational API Requests with an open Monitoring-phase incident (CR-001 floor applies only to global severity)", async () => {
+      const incidents = [makeIncident({
+        id: "api-monitoring",
+        name: "API Requests Recovery",
+        body: "Monitoring recovery.",
+        componentNames: ["API Requests"],
+        componentStatus: "operational",
+      })];
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+
+      await fetchGitHubStatus();
+
+      expect(getGitHubStatus()!.severity).toBe("minor");
+      expect(getGitHubStatus()!.apiSeverity).toBe("none");
+      expect(isGitHubApiOutage()).toBe(false);
+    });
+
+    it("returns false when Actions is major_outage while API Requests is operational", async () => {
+      const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+        makeComponent(n, n === "Actions" ? "major_outage" : "operational")
+      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components }))));
+
+      await fetchGitHubStatus();
+
+      expect(getGitHubStatus()!.severity).toBe("critical");
+      expect(getGitHubStatus()!.apiSeverity).toBe("none");
+      expect(isGitHubApiOutage()).toBe(false);
+    });
+
+    it("restores apiSeverity and isGitHubApiOutage on cold-start 304 cache hit and clears on recovery to operational", async () => {
+      const outageComponents = [...TRACKED_COMPONENT_NAMES].map((n) =>
+        makeComponent(n, n === "API Requests" ? "partial_outage" : "operational")
+      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components: outageComponents }), { etag: "etag-api" })));
+      await fetchGitHubStatus();
+      expect(isGitHubApiOutage()).toBe(true);
+
+      resetGitHubStatusState();
+      expect(isGitHubApiOutage()).toBe(false);
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 304 })));
+      await fetchGitHubStatus();
+      expect(getGitHubStatus()!.apiSeverity).toBe("major");
+      expect(isGitHubApiOutage()).toBe(true);
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary())));
+      await fetchGitHubStatus();
+      expect(getGitHubStatus()!.apiSeverity).toBe("none");
+      expect(isGitHubApiOutage()).toBe(false);
+    });
+
+    it("preserves outage state across 2 network failures, clears on failure 3, and preserves _previousIncidents for subsequent resolution", async () => {
+      const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+        makeComponent(n, n === "API Requests" ? "major_outage" : "operational")
+      );
+      const incidents = [makeIncident({ id: "api-1", name: "API Outage", body: "Investigating", componentNames: ["API Requests"] })];
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components, incidents }))));
+      await fetchGitHubStatus();
+      expect(isGitHubApiOutage()).toBe(true);
+
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+      await fetchGitHubStatus(); // failure 1
+      expect(getGitHubStatus()).not.toBeNull();
+      expect(isGitHubApiOutage()).toBe(true);
+
+      await fetchGitHubStatus(); // failure 2
+      expect(getGitHubStatus()).not.toBeNull();
+      expect(isGitHubApiOutage()).toBe(true);
+
+      await fetchGitHubStatus(); // failure 3 (CONSECUTIVE_FAILURE_THRESHOLD)
+      expect(getGitHubStatus()).toBeNull();
+      expect(isGitHubApiOutage()).toBe(false);
+
+      mockPushNotification.mockClear();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents: [] }))));
+      await fetchGitHubStatus();
+      expect(mockPushNotification).toHaveBeenCalledWith("github-status-resolved", "API Outage", "info", false);
+    });
+
+    it("preserves outage state across 2 schema-drift failures, clears on failure 3, and preserves _previousIncidents for subsequent resolution", async () => {
+      const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+        makeComponent(n, n === "API Requests" ? "partial_outage" : "operational")
+      );
+      const incidents = [makeIncident({ id: "api-2", name: "API Degradation", body: "Investigating", componentNames: ["API Requests"] })];
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components, incidents }))));
+      await fetchGitHubStatus();
+      expect(isGitHubApiOutage()).toBe(true);
+
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const badResponse = () => jsonResponse({ components: "not-an-array", incidents: [] });
+
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(badResponse())));
+      await fetchGitHubStatus(); // failure 1
+      expect(getGitHubStatus()).not.toBeNull();
+      expect(isGitHubApiOutage()).toBe(true);
+
+      await fetchGitHubStatus(); // failure 2
+      expect(getGitHubStatus()).not.toBeNull();
+      expect(isGitHubApiOutage()).toBe(true);
+
+      await fetchGitHubStatus(); // failure 3
+      expect(getGitHubStatus()).toBeNull();
+      expect(isGitHubApiOutage()).toBe(false);
+
+      mockPushNotification.mockClear();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents: [] }))));
+      await fetchGitHubStatus();
+      expect(mockPushNotification).toHaveBeenCalledWith("github-status-resolved", "API Degradation", "info", false);
+    });
   });
 });

@@ -27,8 +27,10 @@ vi.mock("../../src/app/lib/errors", () => ({
   clearNotifications: vi.fn(),
   resetNotificationState: vi.fn(),
   addMutedSource: vi.fn(),
+  removeMutedSource: vi.fn(),
   isMuted: vi.fn(() => false),
   clearMutedSources: vi.fn(),
+  onNotificationDismissed: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("../../src/app/lib/notifications", () => ({
@@ -95,6 +97,13 @@ vi.mock("../../src/app/lib/sentry-facade", () => ({
   reportBoundaryError: vi.fn(),
   installEarlyErrorCapture: vi.fn(),
   startSentryLoad: vi.fn(),
+}));
+
+const mockIsGitHubApiOutage = vi.fn().mockReturnValue(false);
+vi.mock("../../src/app/services/github-status", () => ({
+  fetchGitHubStatus: vi.fn().mockResolvedValue(undefined),
+  isGitHubApiOutage: () => mockIsGitHubApiOutage(),
+  getGitHubStatus: vi.fn().mockReturnValue(null),
 }));
 
 // Import AFTER mocks
@@ -852,6 +861,207 @@ describe("createEventsPollCoordinator", () => {
     // but generation changed during the fetch → targeted data discarded
     expect(mockFetchIssuesAndPullRequests).toHaveBeenCalled();
     expect(onTargetedData).not.toHaveBeenCalled();
+  });
+
+  it("fetchTargetedRepoData rethrows 401 and sets retryable: false on non-5xx errors", async () => {
+    mockGetClient.mockReturnValue(makeOctokit());
+    const makeSummaryMap = (repo: string) =>
+      new Map([[repo, makeRepoSummary({ repoFullName: repo, hasWorkflowActivity: true })]]);
+
+    // 1. 401 from fetchIssuesAndPullRequests rethrows
+    mockFetchIssuesAndPullRequests.mockRejectedValueOnce(Object.assign(new Error("Bad credentials"), { status: 401 }));
+    mockFetchWorkflowRuns.mockResolvedValueOnce({ workflowRuns: [], errors: [] });
+    await expect(fetchTargetedRepoData(makeSummaryMap("owner/repo-1"))).rejects.toMatchObject({ status: 401 });
+
+    // 2. 401 from fetchWorkflowRuns rethrows
+    mockFetchIssuesAndPullRequests.mockResolvedValueOnce({ issues: [], pullRequests: [], errors: [] });
+    mockFetchWorkflowRuns.mockRejectedValueOnce(Object.assign(new Error("Bad credentials"), { status: 401 }));
+    await expect(fetchTargetedRepoData(makeSummaryMap("owner/repo-2"))).rejects.toMatchObject({ status: 401 });
+
+    // 3. Non-5xx (403) sets retryable: false, 500 sets retryable: true
+    mockFetchIssuesAndPullRequests.mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
+    mockFetchWorkflowRuns.mockRejectedValueOnce(Object.assign(new Error("Server Error"), { status: 500 }));
+    const res = await fetchTargetedRepoData(makeSummaryMap("owner/repo-3"));
+    expect(res.errors).toEqual([
+      expect.objectContaining({ repo: "targeted-issues", statusCode: 403, retryable: false }),
+      expect.objectContaining({ repo: "targeted-runs", statusCode: 500, retryable: true }),
+    ]);
+  });
+
+  it("exits without rescheduling or warning spam when cycleEpoch !== identityEpoch() on 401", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockFetchUserEvents.mockImplementation(async () => {
+      mockIdentityEpoch.mockImplementation(() => 1);
+      throw Object.assign(new Error("Bad credentials"), { status: 401 });
+    });
+
+    let coordinator: { destroy: () => void };
+    try {
+      createRoot((dispose) => {
+        coordinator = createEventsPollCoordinator(
+          () => "testuser",
+          () => new Set(["owner/repo"]),
+          () => false,
+          vi.fn(),
+        );
+        dispose();
+      });
+
+      vi.advanceTimersByTime(0);
+      await flushPromises();
+      expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      // Advance well past any backoff interval — must not reschedule
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+      coordinator!.destroy();
+    } finally {
+      mockIdentityEpoch.mockImplementation(() => 0);
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("logs templated warning without raw RequestError on same-epoch 401", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockFetchUserEvents.mockRejectedValueOnce(
+      Object.assign(new Error("Raw secret token leak"), { status: 401 })
+    );
+
+    let coordinator: { destroy: () => void };
+    try {
+      createRoot((dispose) => {
+        coordinator = createEventsPollCoordinator(
+          () => "testuser",
+          () => new Set(["owner/repo"]),
+          () => false,
+          vi.fn(),
+        );
+        dispose();
+      });
+
+      vi.advanceTimersByTime(0);
+      await flushPromises();
+      expect(warnSpy).toHaveBeenCalledWith("[events-poll] GitHub authentication check failed temporarily");
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining("Raw secret"));
+      coordinator!.destroy();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("pauses fetchUserEvents and fetchTargetedRepoData across 3+ ticks at constant 60s interval during API outage and resumes when false", async () => {
+    mockIsGitHubApiOutage.mockReturnValue(true);
+    mockFetchUserEvents.mockResolvedValue({ events: [], changed: false });
+
+    let coordinator: { destroy: () => void };
+    try {
+      createRoot((dispose) => {
+        coordinator = createEventsPollCoordinator(
+          () => "testuser",
+          () => new Set(["owner/repo"]),
+          () => false,
+          vi.fn(),
+        );
+        dispose();
+      });
+
+      // Initial tick + 3 subsequent 60s ticks while outage is active
+      vi.advanceTimersByTime(0);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockFetchUserEvents).not.toHaveBeenCalled();
+      expect(mockFetchIssuesAndPullRequests).not.toHaveBeenCalled();
+
+      // Outage clears -> next 60s tick resumes immediately (no backoff)
+      mockIsGitHubApiOutage.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+
+      coordinator!.destroy();
+    } finally {
+      mockIsGitHubApiOutage.mockReturnValue(false);
+    }
+  });
+
+  it("skips fetchTargetedRepoData when isGitHubApiOutage flips true mid-cycle between fetchUserEvents and fetchTargetedRepoData", async () => {
+    const event = {
+      id: "401",
+      type: "IssuesEvent",
+      actor: { id: 1, login: "user" },
+      repo: { id: 1, name: "owner/repo" },
+      payload: {},
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    mockIsGitHubApiOutage.mockReturnValue(false);
+    mockFetchUserEvents.mockImplementation(async () => {
+      mockIsGitHubApiOutage.mockReturnValue(true);
+      return { events: [event], changed: true };
+    });
+    mockParseRepoEvents.mockReturnValue(
+      new Map([["owner/repo", makeRepoSummary({ repoFullName: "owner/repo" })]]),
+    );
+    const onTargetedData = vi.fn();
+
+    let coordinator: { destroy: () => void };
+    try {
+      createRoot((dispose) => {
+        coordinator = createEventsPollCoordinator(
+          () => "testuser",
+          () => new Set(["owner/repo"]),
+          () => false,
+          onTargetedData,
+        );
+        dispose();
+      });
+
+      vi.advanceTimersByTime(0);
+      await flushPromises();
+      expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+      expect(mockFetchIssuesAndPullRequests).not.toHaveBeenCalled();
+      expect(onTargetedData).not.toHaveBeenCalled();
+
+      coordinator!.destroy();
+    } finally {
+      mockIsGitHubApiOutage.mockReturnValue(false);
+    }
+  });
+
+  it("skips backoff inflation and console.warn on 401 while isGitHubApiOutage is true and reschedules at 60s", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockIsGitHubApiOutage.mockReturnValueOnce(false).mockReturnValue(true);
+    mockFetchUserEvents.mockRejectedValueOnce(Object.assign(new Error("Bad credentials"), { status: 401 }));
+    mockFetchUserEvents.mockResolvedValue({ events: [], changed: false });
+
+    let coordinator: { destroy: () => void };
+    try {
+      createRoot((dispose) => {
+        coordinator = createEventsPollCoordinator(
+          () => "testuser",
+          () => new Set(["owner/repo"]),
+          () => false,
+          vi.fn(),
+        );
+        dispose();
+      });
+
+      vi.advanceTimersByTime(0);
+      await flushPromises();
+      expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      // Outage clears, next tick must fire at base 60s (no 2x backoff from the 401)
+      mockIsGitHubApiOutage.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockFetchUserEvents).toHaveBeenCalledTimes(2);
+
+      coordinator!.destroy();
+    } finally {
+      mockIsGitHubApiOutage.mockReturnValue(false);
+      warnSpy.mockRestore();
+    }
   });
 });
 

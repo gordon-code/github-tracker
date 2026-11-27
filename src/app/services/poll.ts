@@ -1,17 +1,18 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
 import { captureException } from "../lib/sentry-facade";
 import { getClient, fetchRateLimitDetails } from "./github";
-import { fetchGitHubStatus } from "./github-status";
+import { fetchGitHubStatus, isGitHubApiOutage, getGitHubStatus } from "./github-status";
 import { config } from "../stores/config";
-import { user, onAuthCleared, expireToken, identityEpoch } from "../stores/auth";
+import { user, onAuthCleared, identityEpoch, clearAuthOutageSuspension } from "../stores/auth";
+import { isUnauthorizedError } from "../lib/http-errors";
 import { checkAndResetIfExpired } from "./api-usage";
+import { checkPatExpiryReminder } from "../lib/pat-expiry";
 import {
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
   fetchHotPRStatus,
   fetchWorkflowRunById,
   pooledAllSettled,
-  isUnauthorizedError,
   type Issue,
   type PullRequest,
   type WorkflowRun,
@@ -360,6 +361,7 @@ export async function fetchAllData(
 
 const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+const OUTAGE_PROBE_INTERVAL_MS = 60_000; // 60s status probe when refreshInterval === 0 during API outage
 
 // Sources managed by the poll coordinator — used for reconciliation
 const POLL_MANAGED_SOURCES = new Set([
@@ -390,7 +392,8 @@ function withJitter(intervalMs: number): number {
  */
 export function createPollCoordinator(
   getInterval: () => number,
-  fetchAll: (force?: boolean) => Promise<DashboardData>
+  fetchAll: (force?: boolean) => Promise<DashboardData>,
+  options?: { onOutagePaused?: () => void },
 ): PollCoordinator {
   const [isRefreshing, setIsRefreshing] = createSignal(false);
   const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
@@ -402,6 +405,44 @@ export function createPollCoordinator(
   let hiddenAt: number | null = null;
   let destroyed = false;
   let pendingForce = false;
+  let statusProbeInFlight = false;
+  let fetchStartCount = 0;
+  let outageProbeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  function clearOutageProbeTimer(): void {
+    if (outageProbeTimeoutId !== null) {
+      clearTimeout(outageProbeTimeoutId);
+      outageProbeTimeoutId = null;
+    }
+  }
+
+  function scheduleOutageProbe(): void {
+    clearOutageProbeTimer();
+    if (destroyed || getInterval() !== 0 || !isGitHubApiOutage()) return;
+    outageProbeTimeoutId = setTimeout(() => {
+      outageProbeTimeoutId = null;
+      void runOutageProbe();
+    }, OUTAGE_PROBE_INTERVAL_MS);
+  }
+
+  async function runOutageProbe(): Promise<void> {
+    if (destroyed || getInterval() !== 0 || !isGitHubApiOutage()) return;
+    if (document.visibilityState === "hidden" || (typeof navigator !== "undefined" && !navigator.onLine)) {
+      scheduleOutageProbe();
+      return;
+    }
+    if (!statusProbeInFlight) {
+      statusProbeInFlight = true;
+      try {
+        await fetchGitHubStatus();
+      } finally {
+        statusProbeInFlight = false;
+      }
+    }
+    if (!destroyed && getInterval() === 0 && isGitHubApiOutage()) {
+      scheduleOutageProbe();
+    }
+  }
 
   function clearWakeAndOnlineTimers(): void {
     if (wakeTimeoutId !== null) {
@@ -420,6 +461,7 @@ export function createPollCoordinator(
 
   async function doFetch(force = false): Promise<void> {
     if (destroyed) return;
+    checkPatExpiryReminder(config.authMethod, config.patExpiresAt);
     if (isRefreshing()) {
       if (force) pendingForce = true;
       return;
@@ -454,7 +496,31 @@ export function createPollCoordinator(
       }
       return;
     }
+    let probedStatusThisTick = false;
+    if (!force && isGitHubApiOutage()) {
+      if (statusProbeInFlight) return;
+      const priorFetchStarts = fetchStartCount;
+      statusProbeInFlight = true;
+      try {
+        await fetchGitHubStatus();
+      } finally {
+        statusProbeInFlight = false;
+      }
+      if (destroyed || isRefreshing() || fetchStartCount !== priorFetchStarts) {
+        if (!destroyed && getInterval() === 0 && isGitHubApiOutage() && outageProbeTimeoutId === null) {
+          scheduleOutageProbe();
+        }
+        return;
+      }
+      if (isGitHubApiOutage()) {
+        options?.onOutagePaused?.();
+        if (getInterval() === 0) scheduleOutageProbe();
+        return;
+      }
+      probedStatusThisTick = true;
+    }
     checkAndResetIfExpired();
+    fetchStartCount++;
     setIsRefreshing(true);
     // Fire-and-forget: seeds footer signals concurrently with fetchAll. If GET /rate_limit
     // resolves after a GraphQL response, the footer briefly shows pre-query remaining (cosmetic).
@@ -463,7 +529,9 @@ export function createPollCoordinator(
     // outages affecting tracked components. Fully self-contained (own try/catch,
     // own notification push/dismiss) — no interaction with this cycle's error
     // handling or the fetchAll() try/catch below.
-    void fetchGitHubStatus();
+    if (!probedStatusThisTick) {
+      void fetchGitHubStatus();
+    }
 
     // Snapshot sources of notifications from previous cycle (for reconciliation)
     const previousSources = new Set(
@@ -471,10 +539,14 @@ export function createPollCoordinator(
         .filter((n) => POLL_MANAGED_SOURCES.has(n.source) || n.source.includes("/"))
         .map((n) => n.source)
     );
-    startCycleTracking();
+    const cycleToken = startCycleTracking();
+    const cycleEpoch = identityEpoch();
 
     try {
       const data = await fetchAll(force);
+      if (destroyed || cycleEpoch !== identityEpoch()) {
+        return;
+      }
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally, routing backfill-batch-* through 3-Tier escalation
       const nonBackfillErrors = processBackfillErrors(data.errors, data.pullRequests);
@@ -482,7 +554,7 @@ export function createPollCoordinator(
         pushError(err.repo, err.message, err.retryable);
       }
       // Reconcile: dismiss notifications for sources that didn't push this cycle
-      const pushedThisCycle = endCycleTracking();
+      const pushedThisCycle = endCycleTracking(cycleToken);
       for (const source of previousSources) {
         if (!pushedThisCycle.has(source)) {
           dismissNotificationBySource(source);
@@ -491,7 +563,13 @@ export function createPollCoordinator(
       const newItems = detectNewItems(data);
       dispatchNotifications(newItems, config);
     } catch (err) {
-      if (err instanceof StaleIdentityError) {
+      if (err instanceof StaleIdentityError || cycleEpoch !== identityEpoch()) {
+        return;
+      }
+      if (isUnauthorizedError(err)) {
+        if (!isGitHubApiOutage()) {
+          pushError("poll", "GitHub authentication check failed temporarily — will retry", true);
+        }
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error during data fetch";
@@ -499,7 +577,7 @@ export function createPollCoordinator(
       pushError("poll", message, true);
       // No reconciliation on catch — can't know what resolved
     } finally {
-      endCycleTracking(); // Safe to call twice (returns empty Set if already ended)
+      endCycleTracking(cycleToken); // Safe to call twice (returns empty Set if already ended)
       setIsRefreshing(false);
       if (pendingForce) {
         pendingForce = false;
@@ -545,6 +623,7 @@ export function createPollCoordinator(
       }
     } else {
       // Became visible
+      checkPatExpiryReminder(config.authMethod, config.patExpiresAt);
       const wasHiddenFor = hiddenAt !== null ? Date.now() - hiddenAt : 0;
 
       if (wasHiddenFor > REVISIT_THRESHOLD_MS) {
@@ -578,6 +657,29 @@ export function createPollCoordinator(
     startTimer(intervalSec);
   });
 
+  // Reactive effect: run 60s status probe in manual mode (interval === 0) during API outage
+  createEffect(() => {
+    if (getInterval() === 0 && isGitHubApiOutage() && !destroyed) {
+      scheduleOutageProbe();
+    } else {
+      clearOutageProbeTimer();
+    }
+  });
+
+  // Reactive effect: clear auth outage suspension when GitHub API recovers
+  // (requiring getGitHubStatus() !== null so 3x-failure status reset doesn't falsely clear suspension)
+  let wasApiOutage = isGitHubApiOutage();
+  createEffect(() => {
+    const currentOutage = isGitHubApiOutage();
+    const status = getGitHubStatus();
+    if (status !== null) {
+      if (wasApiOutage && !currentOutage) {
+        clearAuthOutageSuspension();
+      }
+      wasApiOutage = currentOutage;
+    }
+  });
+
   // Immediate fetch on init
   void doFetch();
 
@@ -585,6 +687,7 @@ export function createPollCoordinator(
     destroyed = true;
     pendingForce = false;
     clearTimer();
+    clearOutageProbeTimer();
     clearWakeAndOnlineTimers();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
@@ -890,6 +993,12 @@ export function createHotPollCoordinator(
       return;
     }
 
+    if (isGitHubApiOutage()) {
+      consecutiveFailures = 0;
+      schedule(myGeneration);
+      return;
+    }
+
     // Skip fetch when no authenticated client (e.g., mid-logout)
     // Guarded: getClient() can throw during auth state transitions
     let client: ReturnType<typeof getClient>;
@@ -926,17 +1035,15 @@ export function createHotPollCoordinator(
       // identity's token or surface errors to it.
       if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
       if (isUnauthorizedError(err)) {
-        // Token invalid — same re-auth path as the full poll (poll.ts throw at
-        // fetchAllData) and cross-tab sync (auth.ts storage listener): clear the
-        // token and hard-redirect. Don't schedule another cycle — page is navigating.
-        captureException(err, { tags: { source: "hot-poll-auth-expired" } });
-        expireToken();
-        window.location.replace("/login");
-        return;
+        if (!isGitHubApiOutage()) {
+          consecutiveFailures++;
+          pushError("hot-poll", "GitHub authentication check failed temporarily — retrying", true);
+        }
+      } else {
+        consecutiveFailures++;
+        const message = err instanceof Error ? err.message : "Unknown hot-poll error";
+        pushError("hot-poll", message, true);
       }
-      consecutiveFailures++;
-      const message = err instanceof Error ? err.message : "Unknown hot-poll error";
-      pushError("hot-poll", message, true);
     } finally {
       if (myGeneration === chainGeneration) {
         startedCycle = false;
@@ -1052,11 +1159,29 @@ export async function fetchTargetedRepoData(
   const errors: ApiError[] = [];
   if (issuesAndPrsResult.status === "rejected") {
     const err = issuesAndPrsResult.reason;
-    errors.push({ repo: "targeted-issues", statusCode: null, message: err instanceof Error ? err.message : String(err), retryable: true });
+    if (isUnauthorizedError(err)) throw err;
+    const statusCode = typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+      ? ((err as Record<string, unknown>).status as number)
+      : null;
+    errors.push({
+      repo: "targeted-issues",
+      statusCode,
+      message: err instanceof Error ? err.message : String(err),
+      retryable: statusCode === null || statusCode >= 500,
+    });
   }
   if (runResult.status === "rejected") {
     const err = runResult.reason;
-    errors.push({ repo: "targeted-runs", statusCode: null, message: err instanceof Error ? err.message : String(err), retryable: true });
+    if (isUnauthorizedError(err)) throw err;
+    const statusCode = typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+      ? ((err as Record<string, unknown>).status as number)
+      : null;
+    errors.push({
+      repo: "targeted-runs",
+      statusCode,
+      message: err instanceof Error ? err.message : String(err),
+      retryable: statusCode === null || statusCode >= 500,
+    });
   }
 
   const issuesAndPrsData = issuesAndPrsResult.status === "fulfilled" ? issuesAndPrsResult.value : null;
@@ -1169,11 +1294,17 @@ export function createEventsPollCoordinator(
       return;
     }
 
+    if (isGitHubApiOutage()) {
+      consecutiveFailures = 0;
+      schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+      return;
+    }
+
     const cycleEpoch = identityEpoch();
 
     try {
       const { events, changed } = await fetchUserEvents(octokit, username);
-      if (myGeneration !== chainGeneration) return;
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
 
       if (!changed || events.length === 0) {
         consecutiveFailures = 0;
@@ -1194,10 +1325,16 @@ export function createEventsPollCoordinator(
         return;
       }
 
+      if (isGitHubApiOutage()) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
       const preGeneration = getHotPollGeneration();
 
       const data = await fetchTargetedRepoData(repoSummaries);
-      if (myGeneration !== chainGeneration) return;
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
 
       if (preGeneration !== getHotPollGeneration()) {
         consecutiveFailures = 0;
@@ -1215,8 +1352,17 @@ export function createEventsPollCoordinator(
       onTargetedData(data, affectedRepos, cycleEpoch);
       consecutiveFailures = 0;
     } catch (err) {
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
+      if (isUnauthorizedError(err) && isGitHubApiOutage()) {
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
       consecutiveFailures++;
-      console.warn("[events-poll] cycle error:", err instanceof Error ? err.message : String(err));
+      if (isUnauthorizedError(err)) {
+        console.warn("[events-poll] GitHub authentication check failed temporarily");
+      } else {
+        console.warn("[events-poll] cycle error:", err instanceof Error ? err.message : String(err));
+      }
     }
 
     schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);

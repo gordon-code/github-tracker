@@ -33,6 +33,7 @@ import {
 import type { GitHubUser, JiraAuthState } from "../stores/auth";
 import { JIRA_SETTINGS_ACTION } from "../../shared/jira-types";
 import { pushNotification } from "./errors";
+import { clearPatExpiryDismissal } from "./pat-expiry";
 import { proxyFetch, sealCredentialBundle } from "./proxy";
 
 // ── Export ────────────────────────────────────────────────────────────
@@ -47,6 +48,8 @@ import { proxyFetch, sealCredentialBundle } from "./proxy";
 export const EXPORT_DENYLIST: Record<string, readonly string[]> = {
   jira: ["email"],
 };
+
+export const EXPORT_TOP_LEVEL_DENYLIST = ["patExpiresAt"] as const;
 
 /** Version stamp on exported payloads (bump on an incompatible format change). */
 export const EXPORT_VERSION = 1;
@@ -137,6 +140,9 @@ export function buildExportPayload(currentConfig: Config, viewState: ViewState):
         delete (parent as Record<string, unknown>)[childKey];
       }
     }
+  }
+  for (const key of EXPORT_TOP_LEVEL_DENYLIST) {
+    delete snapshot[key];
   }
   return {
     ...snapshot,
@@ -456,6 +462,7 @@ export const CredentialBundleSchema = z.object({
   github: z.object({
     token: z.string(),
     method: z.enum(["pat", "oauth"]),
+    patExpiresAt: z.nullable(z.iso.date()).optional(),
   }),
   jira: z.union([
     z.null(),
@@ -536,7 +543,14 @@ export function assembleCredentialBundle(): CredentialBundle {
     }
   }
 
-  return { github: { token: githubToken, method }, jira };
+  return {
+    github: {
+      token: githubToken,
+      method,
+      ...(method === "pat" && config.patExpiresAt ? { patExpiresAt: config.patExpiresAt } : {}),
+    },
+    jira,
+  };
 }
 
 /**
@@ -714,6 +728,10 @@ export async function commitImportedSettings(
       ...(jira.authMethod === "token" && jira.email ? { email: jira.email } : {}),
     };
   }
+  importedConfig.authMethod = resolved.bundle.github.method;
+  importedConfig.patExpiresAt =
+    resolved.bundle.github.method === "pat" ? (resolved.bundle.github.patExpiresAt ?? null) : null;
+  clearPatExpiryDismissal();
   setConfig(importedConfig);
   applyImportedViewState(viewPreferences);
 

@@ -5,7 +5,7 @@ import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth"
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
 import { evictStaleEntries, evictKeysWithPrefix } from "./stores/cache";
-import LoginPage from "./pages/LoginPage";
+import { reloadOnceForStaleChunk } from "./lib/chunk-reload";
 import OAuthCallback from "./pages/OAuthCallback";
 import JiraCallback from "./pages/JiraCallback";
 import PrivacyPage from "./pages/PrivacyPage";
@@ -19,23 +19,16 @@ export function _resetAuthInitStartedForTests(): void {
   authInitGen++;
 }
 
-const CHUNK_RELOAD_KEY = "github-tracker:chunk-reload";
-const CHUNK_RELOAD_MAX_AGE = 10_000;
-
 function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
   return lazy(() =>
     loader().catch((err) => {
-      const last = sessionStorage.getItem(CHUNK_RELOAD_KEY);
-      if (!last || Date.now() - Number(last) > CHUNK_RELOAD_MAX_AGE) {
-        sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
-        window.location.reload();
-        return new Promise<never>(() => {});
-      }
+      if (reloadOnceForStaleChunk()) return new Promise<never>(() => {});
       throw err;
     }),
   );
 }
 
+const LoginPage = lazyWithReload(() => import("./pages/LoginPage"));
 const DashboardPage = lazyWithReload(() => import("./components/dashboard/DashboardPage"));
 const OnboardingWizard = lazyWithReload(() => import("./components/onboarding/OnboardingWizard"));
 const SettingsPage = lazyWithReload(() => import("./components/settings/SettingsPage"));

@@ -7,6 +7,8 @@ import "fake-indexeddb/auto";
 vi.mock("../../src/app/stores/auth", () => ({
   token: () => "fake-token-for-rate-limit-tests",
   onAuthCleared: vi.fn(),
+  handleRuntimeUnauthorized: vi.fn().mockResolvedValue("preserved"),
+  clearAuthOutageSuspension: vi.fn(),
 }));
 
 // ── Imports after mocks ───────────────────────────────────────────────────────
@@ -67,6 +69,8 @@ describe("fetchRateLimitDetails — success response", () => {
     vi.doMock("../../src/app/stores/auth", () => ({
       token: () => "fake-token-for-rate-limit-tests",
       onAuthCleared: vi.fn(),
+      handleRuntimeUnauthorized: vi.fn().mockResolvedValue("preserved"),
+      clearAuthOutageSuspension: vi.fn(),
     }));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(
@@ -88,6 +92,8 @@ describe("fetchRateLimitDetails — staleness cache", () => {
     vi.doMock("../../src/app/stores/auth", () => ({
       token: () => "fake-token-for-staleness-test",
       onAuthCleared: vi.fn(),
+      handleRuntimeUnauthorized: vi.fn().mockResolvedValue("preserved"),
+      clearAuthOutageSuspension: vi.fn(),
     }));
     const mockFetch = vi.fn().mockResolvedValue(makeSuccessResponse());
     vi.stubGlobal("fetch", mockFetch);
@@ -116,6 +122,8 @@ describe("fetchRateLimitDetails — null client", () => {
     vi.doMock("../../src/app/stores/auth", () => ({
       token: () => null,
       onAuthCleared: vi.fn(),
+      handleRuntimeUnauthorized: vi.fn().mockResolvedValue("preserved"),
+      clearAuthOutageSuspension: vi.fn(),
     }));
 
     const { fetchRateLimitDetails: freshFetch } = await import("../../src/app/services/github");
